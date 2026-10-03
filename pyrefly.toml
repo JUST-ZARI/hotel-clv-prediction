@@ -1,0 +1,5 @@
+# Pyrefly (type checker / VS Code language server) settings.
+# The Streamlit app's modules (auth, components, charts, data, …) live in frontend/,
+# and scripts such as supabase/verify_setup.py import them from there.
+search-path = ["frontend"]
+python-interpreter-path = "frontend/.venv/Scripts/python.exe"
