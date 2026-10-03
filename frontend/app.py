@@ -1,42 +1,59 @@
 import streamlit as st
-from utils import init_session_state
 
-st.set_page_config(page_title="Hotel CLV Dashboard", page_icon="🏨", layout="wide")
+import auth
+from data import repository as repo
+from style import inject_global_css
+from utils import init_session_state, render_sidebar
+
+st.set_page_config(page_title="Hotel CLV", page_icon=":material/apartment:", layout="wide",
+                   initial_sidebar_state=240)
 init_session_state()
+inject_global_css()
 
-# --- Define every page once ---
-setup_page = st.Page("views/setup.py", title="Setup", icon=":material/settings:")
-login_page = st.Page("views/login.py", title="Login", icon=":material/login:")
+RM, MK = "revenue_manager", "marketing"
 
-action_board_page = st.Page("views/action_board.py", title="Action Board",
-                             icon=":material/dashboard:", default=True)
-guest_lookup_page = st.Page("views/guest_lookup.py", title="Guest Lookup",
-                             icon=":material/search:")
-segments_page = st.Page("views/segments.py", title="Segments",
-                         icon=":material/pie_chart:")
-at_risk_page = st.Page("views/at_risk_guests.py", title="At-Risk Guests",
-                        icon=":material/warning:")
-model_performance_page = st.Page("views/model_performance.py", title="Model Performance",
-                                  icon=":material/bar_chart:")
+# --- Public pages ---
+home_page = st.Page("views/home.py", title="Home", url_path="home", default=True)
+login_page = st.Page(auth.LOGIN_PAGE, title="Sign in", url_path="login")
+signup_page = st.Page(auth.SIGNUP_PAGE, title="Create account", url_path="signup")
+PUBLIC_PAGES = [home_page, login_page, signup_page]
 
-# --- Decide which pages are reachable, based on session state ---
-# One-time setup screen shows until both role accounts exist (matches the wireframe's
-# "1 of 2 accounts created" flow). Skip this gate in dummy-data mode by flipping
-# setup_complete to True in utils.init_session_state() once real Supabase auth lands.
-if not st.session_state.setup_complete:
-    pages = [setup_page]
-elif not st.session_state.authenticated:
-    pages = [login_page]
+# --- Protected pages → roles allowed to open them ---
+# Both roles share the four dashboard pages (per the wireframes); what each
+# role sees inside a page is decided in the page. Restrict a whole page by
+# removing a role from its set here.
+PROTECTED_PAGES = {
+    st.Page("views/action_board.py", title="Action Board", icon=":material/space_dashboard:",
+            url_path="action-board"): {RM, MK},
+    st.Page("views/guest_lookup.py", title="Guest Lookup", icon=":material/person_search:",
+            url_path="guest-lookup"): {RM, MK},
+    st.Page("views/segments.py", title="Segments", icon=":material/donut_small:",
+            url_path="segments"): {RM, MK},
+    st.Page("views/at_risk_guests.py", title="At-Risk Guests", icon=":material/warning:",
+            url_path="at-risk"): {RM, MK},
+}
+
+# Every page is registered so direct URLs resolve and can be guarded;
+# the visible menu is rendered by render_sidebar() from the allowed set.
+pg = st.navigation(PUBLIC_PAGES + list(PROTECTED_PAGES), position="hidden")
+
+role = auth.current_role()
+allowed = [p for p, roles in PROTECTED_PAGES.items() if role in roles]
+
+if pg.url_path in {p.url_path for p in PUBLIC_PAGES}:
+    # Signed-in users skip the landing/auth screens.
+    if auth.is_logged_in():
+        st.switch_page(allowed[0])
 else:
-    # Both roles see the same 5 pages (matches wireframes) — role differences are
-    # in-page: column sets, presence of $ figures, CSV export, and the action panel.
-    pages = [action_board_page, guest_lookup_page, segments_page,
-             at_risk_page, model_performance_page]
-
-pg = st.navigation(pages, position="sidebar")
-
-with st.sidebar:
-    st.markdown("### 🏨 CLV Dashboard")
-    st.caption("Revenue Management")
+    if not auth.is_logged_in():
+        auth.set_flash("info", "Please sign in to continue.")
+        st.switch_page(login_page)
+    if not auth.session_valid():
+        auth.logout(revoke=False)
+        auth.set_flash("info", "Your session has expired. Please sign in again.")
+        st.switch_page(login_page)
+    if pg.url_path not in {p.url_path for p in allowed}:
+        st.switch_page(allowed[0])
+    render_sidebar(allowed, current=pg.url_path, counts={"at-risk": repo.overview()["at_risk_high_value"]})
 
 pg.run()

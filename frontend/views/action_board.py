@@ -1,74 +1,120 @@
-import pandas as pd
 import streamlit as st
 
-from data.dummy_guests import ACTION_BOARD_GUESTS, DASHBOARD_STATS, TOTAL_ACTION_BOARD_ROWS
-from utils import render_sidebar_footer, render_top_role_badge, logout_button
+import charts
+import components as ui
+from auth import require_auth
+from data import repository as repo
 
-is_revenue_manager = st.session_state.role == "revenue_manager"
+require_auth()
+rm = ui.is_revenue_manager()
 
-col_title, col_badge = st.columns([3, 1])
-with col_title:
-    st.title("Hotel Guest CLV Dashboard")
-    st.caption("Overview of predicted customer lifetime value and recommended guest actions")
-with col_badge:
-    render_top_role_badge()
-    st.caption(f"🕒 Model updated: {DASHBOARD_STATS['model_updated']}")
-    st.success(f"⚡ {DASHBOARD_STATS['active_model']} Active")
+ui.page_header("Hotel Guest CLV Dashboard",
+               "Overview of predicted customer lifetime value and recommended guest actions")
 
-c1, c2, c3, c4 = st.columns(4)
-with c1, st.container(border=True):
-    st.caption("👥 TOTAL GUESTS")
-    st.markdown(f"### {DASHBOARD_STATS['total_guests']:,}")
-    st.caption("All tracked hotel guests")
-with c2, st.container(border=True):
-    st.caption("📈 HIGH-VALUE GUESTS")
-    st.markdown(f"### :green[{DASHBOARD_STATS['high_value_guests']:,}]")
-    st.caption("15% of total guest base")
-with c3, st.container(border=True):
-    st.caption("⚠️ AT-RISK HIGH-VALUE")
-    st.markdown(f"### :red[{DASHBOARD_STATS['at_risk_high_value']}]")
-    st.caption("Inactive 60+ days")
-with c4, st.container(border=True):
-    st.caption("📊 AVG. PREDICTED CLV")
-    st.markdown(f"### :orange[KSh {DASHBOARD_STATS['avg_predicted_clv']:,}]")
-    st.caption("Across all guests")
+# ---------------------------------------------------------------------------
+# Impact of recent actions (from ACTION_LOGS outcomes)
+# ---------------------------------------------------------------------------
+impact = repo.outcome_summary(days=30)
+items = [
+    ("paper-plane", f"<b>{impact['contacted']:,}</b> guests contacted"),
+    ("rotate-left", f"<b>{impact['came_back']:,}</b> came back ({impact['return_rate']:.0%})"),
+    ("hourglass-half", f"<b>{impact['waiting']:,}</b> still waiting"),
+]
+if rm:
+    items.append(("sack-dollar", f"<b>{ui.ksh(impact['value_retained'])}</b> predicted value retained"))
+st.html('<div class="ds-impact"><span class="ds-impact-k">Last 30 days</span>'
+        + "".join(f'<span class="ds-impact-i"><i class="fa-solid fa-{ic}"></i>{txt}</span>' for ic, txt in items)
+        + "</div>")
 
-st.write("")
+# ---------------------------------------------------------------------------
+# KPIs
+# ---------------------------------------------------------------------------
+o = repo.overview()
+ui.kpi_row([
+    ui.Kpi("Total Guests", f"{o['total_guests']:,}", "All tracked hotel guests", "users"),
+    ui.Kpi("High-Value Guests", f"{o['high_value_guests']:,}",
+           f"{o['high_value_guests'] / o['total_guests']:.0%} of total guest base", "arrow-trend-up", "teal"),
+    ui.Kpi("At-Risk High-Value", f"{o['at_risk_high_value']:,}",
+           f"Inactive {repo.at_risk_days()}+ days", "triangle-exclamation", "red"),
+    ui.Kpi("Avg. Predicted CLV", ui.ksh(o["avg_predicted_clv"]), "Across all guests", "chart-simple", "amber"),
+])
 
-if is_revenue_manager:
-    st.subheader("Top 10 Guests by Predicted CLV")
-    st.caption("Sorted by predicted CLV — coloured by tier")
-    chart_df = pd.DataFrame(ACTION_BOARD_GUESTS)[["guest_id", "predicted_clv", "clv_tier"]].set_index("guest_id")
-    st.bar_chart(chart_df["predicted_clv"], horizontal=True)
-    st.write("")
+queue = repo.action_queue()
 
-st.subheader("Guest Action List")
-st.caption("Prioritised list of guests requiring immediate attention based on CLV predictions"
-           if is_revenue_manager else "Prioritised list of guests requiring campaign actions")
+# ---------------------------------------------------------------------------
+# Top 10 chart — Revenue Manager only
+# ---------------------------------------------------------------------------
+if rm:
+    top = queue.head(10)
+    with ui.card("top10"):
+        with st.container(horizontal=True, vertical_alignment="top"):
+            ui.card_title("Top 10 Guests by Predicted CLV", "Sorted by predicted CLV — coloured by tier")
+            st.space("stretch")
+            ui.export_menu("chart_top10", top[["guest_id", "clv_tier", "predicted_clv"]],
+                           "top10_guests_by_clv", label="Export PNG / CSV")
+        charts.show(
+            charts.hbar_track(
+                labels=top["guest_id"].tolist(),
+                values=top["predicted_clv"].tolist(),
+                colors=[charts.TIER_COLORS[t] for t in top["clv_tier"]],
+                value_text=[ui.ksh(v) for v in top["predicted_clv"]],
+            ),
+            key="chart_top10", filename="top10_guests_by_clv",
+        )
+        st.html('<div class="ds-legend">'
+                + "".join(f'<span><i class="fa-solid fa-circle" style="color:{charts.TIER_COLORS[t]}"></i>{t}</span>'
+                          for t in repo.TIERS) + "</div>")
 
-f1, f2, f3, f4 = st.columns([1, 1, 2, 1])
-f1.selectbox("CLV Tier", ["All Tiers", "Platinum", "High", "Medium", "Low"], label_visibility="collapsed")
-f2.selectbox("Recommended Action", ["All Actions"], label_visibility="collapsed")
-f3.text_input("Search", placeholder="Search Guest ID...", label_visibility="collapsed")
-if is_revenue_manager:
-    f4.button("⬇ Download CSV", width='stretch')
+# ---------------------------------------------------------------------------
+# Guest action list
+# ---------------------------------------------------------------------------
+with ui.card("actions"):
+    with st.container(horizontal=True, vertical_alignment="top"):
+        ui.card_title("Guest Action List",
+                      "Prioritised list of guests requiring immediate attention based on CLV predictions" if rm
+                      else "Prioritised list of guests requiring campaign actions")
+        st.space("stretch")
+        ui.note("Sorted by predicted CLV descending")
 
-df = pd.DataFrame(ACTION_BOARD_GUESTS)
-if is_revenue_manager:
-    display_df = df[["guest_id", "clv_tier", "predicted_clv", "days_since_last_stay"]].rename(
-        columns={"guest_id": "GUEST ID", "clv_tier": "CLV TIER",
-                 "predicted_clv": "PREDICTED CLV (KSH)", "days_since_last_stay": "DAYS SINCE LAST STAY"}
-    )
-else:
-    display_df = df[["guest_id", "clv_tier", "recommended_action", "days_since_last_stay"]].rename(
-        columns={"guest_id": "GUEST ID", "clv_tier": "CLV TIER",
-                 "recommended_action": "RECOMMENDED ACTION", "days_since_last_stay": "DAYS SINCE LAST STAY"}
-    )
-st.dataframe(display_df, width='stretch', hide_index=True)
-st.caption(f"Showing 1–{len(df)} of {TOTAL_ACTION_BOARD_ROWS}")
+    tier_opts = ["All Tiers"] + repo.TIERS
+    action_opts = ["All Actions"] + sorted(queue["recommended_action"].unique())
+    with st.container(key="bar_ab", horizontal=True, vertical_alignment="center"):
+        tier = ui.filter_select("CLV Tier", tier_opts, "ab_tier")
+        action = ui.filter_select("Recommended Action", action_opts, "ab_action", width=330)
+        query = ui.search_box("ab_search")
+        download_slot = st.container(width="content")
 
-st.caption("Predictions generated by XGBoost model trained on historical booking data. "
-           "CLV tiers: High (>KSh 150,000), Medium (KSh 50,000–150,000), Low (<KSh 50,000).")
+    rows = queue
+    if tier != "All Tiers":
+        rows = rows[rows["clv_tier"] == tier]
+    if action != "All Actions":
+        rows = rows[rows["recommended_action"] == action]
+    if query.strip():
+        rows = rows[rows["guest_id"].str.contains(query.strip(), case=False, regex=False)]
 
-render_sidebar_footer()
-logout_button()
+    export_cols = ["guest_id", "clv_tier", "predicted_clv", "recommended_action", "days_since_last_stay"]
+    if not rm:
+        export_cols.remove("predicted_clv")
+    with download_slot:
+        ui.download_csv("Download CSV", rows[export_cols], "guest_action_list.csv", key="ab_csv")
+
+    ui.reset_page_on_change("ab", tier, action, query)
+    start, end = ui.paginate("ab", len(rows))
+
+    cols = [
+        ui.Col("Guest ID", 1.1, kind="guest_link"),
+        ui.Col("CLV Tier", 1.0, lambda r: ui.tier_badge(r["tier_badge"])),
+    ]
+    if rm:
+        cols.append(ui.Col("Predicted CLV (KSh)", 1.6, lambda r: f'<span class="ds-strong">{r["predicted_clv"]:,}</span>'))
+    else:
+        cols.append(ui.Col("Recommended Action", 2.0, lambda r: ui.action_text(r["recommended_action"])))
+    cols += [
+        ui.Col("Days Since Last Stay", 1.4, lambda r: f'{r["days_since_last_stay"]} days'),
+        ui.Col("", 1.0, kind="view_button"),
+    ]
+    ui.data_table("ab", rows.iloc[start:end], cols)
+    ui.pagination_bar("ab", len(rows))
+
+ui.note(f"Predictions generated by {repo.model_meta().model_used} model trained on historical booking data. "
+        "CLV tiers: High (>KSh 150,000), Medium (KSh 50,000–150,000), Low (<KSh 50,000).")
