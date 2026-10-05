@@ -1,64 +1,59 @@
-"""Shared session-state defaults and sidebar branding used across pages."""
+"""Session-state defaults and the authenticated sidebar."""
+
+import html
+import json
 
 import streamlit as st
+
+import auth
+from style import brand_lockup
 
 HOTEL_NAME = "Grand Regency Hotel"
 
 
 def init_session_state():
-    defaults = {
-        "authenticated": False,
-        "role": None,          # "revenue_manager" or "marketing"
-        "setup_complete": False,
-        "accounts_created": {"revenue_manager": False, "marketing": False},
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    auth.init_auth_state()
 
 
 def role_label(role: str) -> str:
-    return "Revenue Manager" if role == "revenue_manager" else "Marketing Team"
+    return auth.ROLES.get(role, "")
 
 
-def render_sidebar_footer():
-    """User identity block pinned at the bottom of the sidebar, matching the wireframes."""
-    st.sidebar.markdown("---")
+def _initials(name: str) -> str:
+    parts = [p for p in (name or "").split() if p]
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+def render_sidebar(nav_pages, current: str, counts: dict[str, int] | None = None):
+    """Brand, role-filtered navigation, signed-in user and logout.
+
+    current is the url_path of the page being shown; counts maps a url_path
+    to a number shown as a badge on that nav item.
+    """
+    s = st.session_state
+    counts = counts or {}
     with st.sidebar:
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            st.markdown("🧑")
-        with col2:
-            st.markdown(f"**{role_label(st.session_state.role)}**")
-            st.caption(HOTEL_NAME)
+        st.html(brand_lockup("Revenue Management"))
+        st.html('<div class="ds-nav-label">Navigation</div>')
+        for page in nav_pages:
+            key = ("navon_" if page.url_path == current else "nav_") + page.url_path
+            with st.container(key=key):
+                st.page_link(page, width="stretch")
+            if page.url_path in counts:
+                st.html(f"<style>.st-key-{key} a::after {{ content: "
+                        f"{json.dumps(f'{counts[page.url_path]:,}')}; }}</style>")
 
-
-def render_top_role_badge():
-    """Small role pill shown top-right on every authenticated page."""
-    st.markdown(
-        f"""
-        <div style="text-align:right;">
-            <span style="background:#eef2ff;color:#3b4ee0;padding:4px 12px;
-            border-radius:6px;font-size:0.85em;font-weight:600;">
-                Role: {role_label(st.session_state.role)}
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_model_status_badges():
-    from data.dummy_guests import DASHBOARD_STATS
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.caption(f"🕒 Model updated: {DASHBOARD_STATS['model_updated']}")
-    with col2:
-        st.success(f"⚡ {DASHBOARD_STATS['active_model']} Active", icon="⚡")
-
-
-def logout_button():
-    if st.sidebar.button("Log out"):
-        st.session_state.authenticated = False
-        st.session_state.role = None
-        st.rerun()
+        with st.container(key="sb_user"):
+            st.html(f"""
+            <div class="ds-user-card">
+                <span class="ds-avatar">{_initials(s.full_name)}</span>
+                <span class="ds-user-meta">
+                    <div class="ds-user-name">{html.escape(s.full_name or "")}</div>
+                    <div class="ds-user-role">{role_label(s.role)}</div>
+                    <div class="ds-user-role">{HOTEL_NAME}</div>
+                </span>
+            </div>""")
+            if st.button("Log out", icon=":material/logout:", width="stretch", key="sidebar_logout"):
+                auth.logout()
+                auth.set_flash("success", "You have been signed out.")
+                st.switch_page(auth.LOGIN_PAGE)

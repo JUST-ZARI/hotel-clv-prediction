@@ -1,0 +1,15 @@
+[theme]
+base = "light"
+primaryColor = "#0F3D3E"
+backgroundColor = "#F3F5F2"
+secondaryBackgroundColor = "#EDF5F1"
+textColor = "#0B0B0C"
+borderColor = "#CCD5D1"
+font = "'Times New Roman', Times, serif"
+baseRadius = "8px"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+port = 8502

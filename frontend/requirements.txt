@@ -1,6 +1,7 @@
-streamlit
+streamlit>=1.64
 pandas
+numpy
 plotly
-supabase
+supabase>=2.31
 fpdf
 python-dotenv
