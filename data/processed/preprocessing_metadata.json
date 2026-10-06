@@ -1,0 +1,187 @@
+{
+  "created_at": "2026-10-06T13:11:14+00:00",
+  "input": "data/processed/merged_dataset.csv",
+  "output": "data/processed/cleaned_dataset.csv",
+  "rows_in": 155665,
+  "rows_out": 121454,
+  "rows_removed": {
+    "ADR < 0": 1,
+    "Invalid arrival date": 37,
+    "0 guests": 180,
+    "0 nights, not cancelled": 698,
+    "ADR = 0, not cancelled": 1463,
+    "Exact duplicate, no booking number": 31832
+  },
+  "currency": {
+    "from": "EUR",
+    "to": "KSh",
+    "eur_to_ksh": 150.0,
+    "source": "Approximate CBK EUR/KES mean rate — update with the official rate and date"
+  },
+  "caps": {
+    "adr_eur": 252.0,
+    "adr_quantile": 0.99,
+    "lead_time_days": 346.0,
+    "lead_time_quantile": 0.99
+  },
+  "target": {
+    "column": "estimated_clv_ksh",
+    "repeat_future_stays": 1,
+    "definition": "stay_value × ((1 − is_canceled) + previous_bookings_not_canceled) + stay_value × is_repeated_guest × repeat_future_stays × reliability"
+  },
+  "missing_value_fill": {
+    "categories": "most common value among guests in the same market segment",
+    "counts": "median of the combined data",
+    "values_used": {
+      "booking_channel": {
+        "Aviation": "Corporate",
+        "Complementary": "Direct",
+        "Corporate": "Corporate",
+        "Direct": "Direct",
+        "Groups": "TA/TO",
+        "Offline TA/TO": "TA/TO",
+        "Online TA": "TA/TO",
+        "Undefined": "Undefined"
+      },
+      "deposit_type": {
+        "Aviation": "No Deposit",
+        "Complementary": "No Deposit",
+        "Corporate": "No Deposit",
+        "Direct": "No Deposit",
+        "Groups": "No Deposit",
+        "Offline TA/TO": "No Deposit",
+        "Online TA": "No Deposit",
+        "Undefined": "No Deposit"
+      },
+      "customer_type": {
+        "Aviation": "Transient",
+        "Complementary": "Transient",
+        "Corporate": "Transient",
+        "Direct": "Transient",
+        "Groups": "Transient-Party",
+        "Offline TA/TO": "Transient",
+        "Online TA": "Transient",
+        "Undefined": "Transient-Party"
+      },
+      "hotel_type": {
+        "Aviation": "City Hotel",
+        "Complementary": "City Hotel",
+        "Corporate": "City Hotel",
+        "Direct": "Resort Hotel",
+        "Groups": "City Hotel",
+        "Offline TA/TO": "City Hotel",
+        "Online TA": "City Hotel",
+        "Undefined": "City Hotel"
+      },
+      "has_agent": {
+        "Aviation": "0",
+        "Complementary": "0",
+        "Corporate": "0",
+        "Direct": "1",
+        "Groups": "1",
+        "Offline TA/TO": "1",
+        "Online TA": "1",
+        "Undefined": "0"
+      },
+      "has_company": {
+        "Aviation": "1",
+        "Complementary": "0",
+        "Corporate": "1",
+        "Direct": "0",
+        "Groups": "0",
+        "Offline TA/TO": "0",
+        "Online TA": "0",
+        "Undefined": "0"
+      }
+    }
+  },
+  "features": [
+    "lead_time",
+    "arrival_year",
+    "arrival_month",
+    "stays_weekend_nights",
+    "stays_week_nights",
+    "total_nights",
+    "num_adults",
+    "num_children",
+    "num_babies",
+    "total_guests",
+    "adr_ksh",
+    "is_repeated_guest",
+    "previous_cancellations",
+    "previous_bookings_not_canceled",
+    "hist_cancellation_rate",
+    "has_previous_bookings",
+    "booking_changes",
+    "required_car_parking_spaces",
+    "total_special_requests",
+    "has_agent",
+    "has_company",
+    "booking_channel_enc",
+    "room_type_reserved_enc",
+    "deposit_type_enc",
+    "market_segment_enc",
+    "meal_plan_enc",
+    "customer_type_enc",
+    "hotel_type_enc"
+  ],
+  "label_encodings": {
+    "booking_channel": {
+      "Corporate": 0,
+      "Direct": 1,
+      "GDS": 2,
+      "TA/TO": 3,
+      "Undefined": 4
+    },
+    "room_type_reserved": {
+      "A": 0,
+      "B": 1,
+      "C": 2,
+      "D": 3,
+      "E": 4,
+      "F": 5,
+      "G": 6,
+      "H": 7,
+      "L": 8,
+      "Room_Type 1": 9,
+      "Room_Type 2": 10,
+      "Room_Type 3": 11,
+      "Room_Type 4": 12,
+      "Room_Type 5": 13,
+      "Room_Type 6": 14,
+      "Room_Type 7": 15
+    },
+    "deposit_type": {
+      "No Deposit": 0,
+      "Non Refund": 1,
+      "Refundable": 2
+    },
+    "market_segment": {
+      "Aviation": 0,
+      "Complementary": 1,
+      "Corporate": 2,
+      "Direct": 3,
+      "Groups": 4,
+      "Offline TA/TO": 5,
+      "Online TA": 6,
+      "Undefined": 7
+    },
+    "meal_plan": {
+      "BB": 0,
+      "FB": 1,
+      "HB": 2,
+      "SC": 3,
+      "Undefined": 4
+    },
+    "customer_type": {
+      "Contract": 0,
+      "Group": 1,
+      "Transient": 2,
+      "Transient-Party": 3
+    },
+    "hotel_type": {
+      "City Hotel": 0,
+      "Resort Hotel": 1
+    }
+  }
+}
