@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-10-06T13:11:14+00:00",
+  "created_at": "2026-10-06T17:20:55+00:00",
   "input": "data/processed/merged_dataset.csv",
   "output": "data/processed/cleaned_dataset.csv",
   "rows_in": 155665,
@@ -142,14 +142,7 @@
       "F": 5,
       "G": 6,
       "H": 7,
-      "L": 8,
-      "Room_Type 1": 9,
-      "Room_Type 2": 10,
-      "Room_Type 3": 11,
-      "Room_Type 4": 12,
-      "Room_Type 5": 13,
-      "Room_Type 6": 14,
-      "Room_Type 7": 15
+      "L": 8
     },
     "deposit_type": {
       "No Deposit": 0,
