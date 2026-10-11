@@ -1,7 +1,6 @@
-from datetime import date
-
 import pandas as pd
 import streamlit as st
+from postgrest.exceptions import APIError
 
 import charts
 import components as ui
@@ -15,7 +14,6 @@ rm = ui.is_revenue_manager()
 
 ui.page_header("Guest Lookup", "Search for an individual guest and review their predicted lifetime value")
 
-DEFAULT_GUEST = "G-10234"
 CHANNELS = {"Email": "Send Email", "SMS": "Send SMS", "Phone call": "Log Call",
             "Front desk (in-stay)": "Log Front-Desk Offer"}
 
@@ -23,7 +21,7 @@ CHANNELS = {"Email": "Send Email", "SMS": "Send SMS", "Phone call": "Log Call",
 # Search
 # ---------------------------------------------------------------------------
 if "lookup_guest_id" not in st.session_state:
-    st.session_state["lookup_guest_id"] = DEFAULT_GUEST
+    st.session_state["lookup_guest_id"] = repo.default_guest_id()
 if st.session_state.get("_lookup_synced") != st.session_state["lookup_guest_id"]:
     # Arrived from "View Guest" elsewhere: show that ID in the search box.
     st.session_state["gl_query"] = st.session_state["lookup_guest_id"]
@@ -44,7 +42,7 @@ def _search() -> None:
 
 with st.form("gl_search", border=False, enter_to_submit=True):
     with st.container(key="gl_searchbar", horizontal=True, vertical_alignment="center"):
-        st.text_input("Guest ID", key="gl_query", type="search", placeholder="Enter Guest ID — e.g. G-10234",
+        st.text_input("Guest ID", key="gl_query", type="search", placeholder="Enter Guest ID — e.g. G-000123",
                       label_visibility="collapsed")
         st.form_submit_button("Search", type="primary", on_click=_search)
 
@@ -60,30 +58,38 @@ gid = g["guest_id"]
 all_guests = repo.guests()
 avg_adr = all_guests["avg_daily_rate"].mean()
 stays, adr, days = int(g["total_previous_stays"]), int(g["avg_daily_rate"]), int(g["days_since_last_stay"])
-tenure_days = (repo.model_meta().predicted_at.date() - date(int(g["first_booking_year"]), 1, 1)).days
-every = max(1, round(tenure_days / max(stays, 1)))
+CHANNEL_NOTE = {"Direct": "High margin", "TA/TO": "Commission-based", "Corporate": "Negotiated rate",
+                "GDS": "Commission-based"}
 
 
 def band(value, cuts, labels):
     return next((lab for cut, lab in zip(cuts, labels) if value < cut), labels[-1])
 
 
+def _log(guest_id: str, action: str, channel: str, status: str) -> None:
+    try:
+        repo.log_action(guest_id, action, channel, status)
+    except APIError:
+        st.toast("The action could not be saved. Please try again.", icon=":material/error:")
+        return
+    st.toast(f"“{action}” recorded as {status}" + (f" via {channel}." if status == "Completed" else "."),
+             icon=":material/check_circle:")
+
+
 insights = [
-    ("repeat", "Repeat Visits", f"{stays} stays", band(stays, [3, 10], ["Occasional guest", "Returning guest", "Strong loyalty"]), ""),
+    ("repeat", "Repeat Visits", f"{stays} previous stays",
+     band(stays, [1, 3, 10], ["First-time guest", "Occasional guest", "Returning guest", "Strong loyalty"]), ""),
     ("arrow-trend-up", "Spending Behaviour",
      "Above avg ADR" if adr > avg_adr * 1.1 else "Below avg ADR" if adr < avg_adr * 0.9 else "Around avg ADR",
      "Premium spender" if adr > avg_adr * 1.1 else "Value-conscious" if adr < avg_adr * 0.9 else "Typical spend",
      "green" if adr > avg_adr * 1.1 else ""),
     ("circle-xmark", "Cancellation", f"{int(g['cancellation_rate'])}% rate",
      band(int(g["cancellation_rate"]), [8, 15, 30], ["Very low", "Low", "Moderate", "High"]), ""),
-    ("calendar", "Booking Frequency", f"Every {every} days",
-     band(every, [60, 180], ["High frequency", "Regular", "Infrequent"]), ""),
-    ("clock", "Recency", f"{days} days ago",
+    ("hotel", "Hotel & Segment", str(g["hotel_type"]), f"{g['market_segment']} · {g['guest_type']}", ""),
+    ("clock", "Recency", f"{days:,} days ago",
      band(days, [30, repo.at_risk_days()], ["Recently active", "Cooling off", "Inactive — at risk"]),
      "red" if days >= repo.at_risk_days() else ""),
-    ("globe", "Booking Channel", g["booking_channel"].replace("Direct / Website", "Direct / Web"),
-     {"Direct / Website": "High margin", "Online TA": "Commission-based", "Offline TA/TO": "Commission-based",
-      "Corporate": "Negotiated rate", "Groups": "Group booking"}[g["booking_channel"]], ""),
+    ("globe", "Booking Channel", str(g["booking_channel"]), CHANNEL_NOTE.get(str(g["booking_channel"]), "Other"), ""),
 ]
 
 # ---------------------------------------------------------------------------
@@ -140,37 +146,41 @@ with right:
         <div class="gl-rec-r">Reason: {ui.esc(g["recommended_action_reason"])}</div>""")
         if not rm:
             if st.button("Log Action", type="primary", width="stretch", key="gl_log"):
-                repo.log_action(gid, g["recommended_action"], "Dashboard", "Pending")
-                st.toast("Action logged as Pending.", icon=":material/check_circle:")
+                _log(gid, g["recommended_action"], "Dashboard", "Pending")
 
     drivers = repo.prediction_drivers(gid)
     with ui.card("gl_drivers"):
-        ui.card_title("Prediction Drivers", "Top features influencing this guest's CLV prediction")
-        charts.show(
-            charts.hbar_track([d for d, _ in drivers], [v for _, v in drivers], [charts.SERIES[i % len(charts.SERIES)] for i in range(len(drivers))],
-                              [f"{v}%" for _, v in drivers], max_value=100, height=30 * len(drivers) + 6),
-            key="chart_drivers", filename=f"{gid}_prediction_drivers",
-        )
-        with st.container(horizontal=True, vertical_alignment="center"):
-            st.html('<span class="ds-pager-info">Download drivers</span>')
-            st.space("stretch")
-            ui.export_menu("chart_drivers", pd.DataFrame(drivers, columns=["feature", "importance_pct"]),
-                           f"{gid}_prediction_drivers", label="PNG / CSV")
+        ui.card_title("Prediction Drivers", "Share of the model's reasoning for this guest — ▲ raised, ▼ lowered the CLV")
+        if not drivers:
+            st.html('<div class="ds-empty">No driver details stored for this prediction.</div>')
+        else:
+            charts.show(
+                charts.hbar_track([d for d, _, _ in drivers], [v for _, v, _ in drivers],
+                                  [charts.SERIES[i % len(charts.SERIES)] for i in range(len(drivers))],
+                                  [f"{'▲' if way == 'up' else '▼'} {v:.0f}%" for _, v, way in drivers],
+                                  max_value=100, height=30 * len(drivers) + 6),
+                key="chart_drivers", filename=f"{gid}_prediction_drivers",
+            )
+            with st.container(horizontal=True, vertical_alignment="center"):
+                st.html('<span class="ds-pager-info">Download drivers</span>')
+                st.space("stretch")
+                ui.export_menu("chart_drivers", pd.DataFrame(drivers, columns=["feature", "impact_pct", "direction"]),
+                               f"{gid}_prediction_drivers", label="PNG / CSV")
 
 # ---------------------------------------------------------------------------
 # Stay timeline
 # ---------------------------------------------------------------------------
 history = repo.stay_history(g)
-earlier = max(0, stays - len(history))
 with ui.card("gl_timeline"):
-    ui.card_title("Historical Stay Timeline")
+    ui.card_title("Stay History", "Latest booking on record · earlier stays are known by count only")
     items = "".join(f"""
     <div class="gl-stay">
         <span class="gl-stay-ico">{icon("hotel")}</span>
-        <b>{s["date"]}</b><span>{s["nights"]} nights</span>
-        <span class="gl-stay-amt">{ui.ksh(s["amount"])}</span><span>{s["room_type"]}</span>
+        <b>{s["date"]}</b><span>{s["nights"]} night{"s" if s["nights"] != 1 else ""} · {s["status"]}</span>
+        <span class="gl-stay-amt">{ui.ksh(s["amount"])} / night</span><span>{ui.esc(s["room_type"])}</span>
     </div>""" for s in history)
-    more = f'<div class="gl-more">+{earlier} earlier</div>' if earlier else ""
+    more = (f'<div class="gl-more">+{stays} earlier stay{"s" if stays != 1 else ""}</div>' if stays
+            else '<div class="gl-more">No earlier stays</div>')
     st.html(f'<div class="gl-stays">{items}{more}</div>')
 
 # ---------------------------------------------------------------------------
@@ -193,11 +203,12 @@ if not rm:
             st.session_state["gl_message"] = default_msg
             st.session_state["_gl_msg_for"] = gid
         st.text_area("Message preview", key="gl_message", height=130)
+        ui.note("Recording only: no message is sent to the guest yet. Contact details in this data are demo "
+                "addresses, and this guest has " + ("" if g["marketing_consent"] else "not ")
+                + "agreed to marketing messages.")
         verb = CHANNELS[channel]
         if st.button(verb, type="primary", width="stretch", key="gl_execute_btn", icon=":material/send:"):
-            repo.log_action(gid, g["recommended_action"], channel, "Completed")
-            st.toast(f"“{g['recommended_action']}” recorded as Completed via {channel}.",
-                     icon=":material/check_circle:")
+            _log(gid, g["recommended_action"], channel, "Completed")
 
 # ---------------------------------------------------------------------------
 # Action logs
@@ -208,8 +219,12 @@ LOG_COLS = [("Action Taken", 2.2), ("Channel", 1.2), ("Status", 1.0), ("Time Sta
             ("Outcome", 1.6)]
 
 
-def _save_outcome(log_id: int, key: str) -> None:
-    repo.set_outcome(log_id, st.session_state[key])
+def _save_outcome(log_id: str, key: str) -> None:
+    try:
+        repo.set_outcome(log_id, st.session_state[key])
+    except (PermissionError, APIError):
+        st.toast("The outcome could not be saved.", icon=":material/error:")
+        return
     st.toast(f"Outcome updated: {st.session_state[key]}.", icon=":material/check_circle:")
 
 

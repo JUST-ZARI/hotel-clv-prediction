@@ -1,5 +1,5 @@
 """
-Verify the Supabase setup after running 001_users.sql and 002_app_tables.sql.
+Verify the Supabase setup after running 001–004 and supabase/load_predictions.py.
 
     frontend/.venv/Scripts/python.exe supabase/verify_setup.py      (from the repo root)
 
@@ -168,6 +168,44 @@ def main() -> int:
             ok, how = denied(lambda: rm.table("action_logs").update({"outcome": "Waiting"}).eq("log_id", lid).execute())
             check("revenue manager cannot edit outcomes", ok, how)
             auth._revoke(rm)
+
+        # ---- 004: model runs, prediction columns, staff names ---------------
+        has_004 = True
+        try:
+            admin.table("model_runs").select("predicted_at").limit(1).execute()
+        except APIError:
+            has_004 = False
+            print("SKIP  model/dashboard checks — run supabase/004_predictions_dashboard.sql first")
+        if has_004:
+            new_cols = {"guests": "market_segment, hotel_type, room_type, meal_plan, booking_canceled, "
+                                  "first_booking_year, marketing_consent",
+                        "clv_predictions": "tier_badge, clv_percentile, top_drivers, in_action_queue"}
+            for table, cols in new_cols.items():
+                try:
+                    user.table(table).select(cols).limit(1).execute()
+                    check(f"can read the 004 columns on {table}", True)
+                except APIError as e:
+                    check(f"can read the 004 columns on {table}", False, e.message or "")
+            for view in ("model_runs", "staff_directory"):
+                ok, how = denied(lambda view=view: anon.table(view).select("*").limit(1).execute())
+                check(f"anon cannot read {view}", ok, how)
+            check("signed-in users can read staff names",
+                  bool(rows(user.table("staff_directory").select("full_name, role").eq("id", uid).execute())))
+            ok, how = denied(lambda: user.table("staff_directory").select("email").limit(1).execute())
+            check("staff directory does not expose emails", ok, how)
+            ok, how = denied(lambda: user.table("model_runs").insert({
+                "predicted_at": datetime.now(timezone.utc).isoformat(), "model_used": "x", "as_of_date": "2019-01-01",
+                "high_min_clv": 1, "low_max_clv": 0, "platinum_min_clv": 2}).execute())
+            check("cannot write model_runs", ok, how)
+            runs = rows(user.table("model_runs").select("predicted_at, guests_predicted")
+                        .order("predicted_at", desc=True).limit(1).execute())
+            if runs:
+                stored = user.table("clv_predictions").select("guest_id", count=CountMethod.exact).limit(0) \
+                    .eq("predicted_at", runs[0]["predicted_at"]).execute().count
+                check("latest run is fully loaded", stored == runs[0]["guests_predicted"],
+                      f"{stored:,} of {runs[0]['guests_predicted']:,} predictions")
+            else:
+                print("SKIP  no predictions loaded yet — run supabase/load_predictions.py")
 
         auth._revoke(user)
     finally:

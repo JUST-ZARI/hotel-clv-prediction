@@ -21,7 +21,11 @@ all_at_risk = repo.at_risk()
 
 def _save_threshold(key: str) -> None:
     """Revenue Manager changed the shared at-risk threshold."""
-    repo.set_at_risk_days(st.session_state[key])
+    try:
+        repo.set_at_risk_days(st.session_state[key])
+    except PermissionError as e:
+        st.toast(str(e), icon=":material/error:")
+        return
     st.toast(f"At-risk threshold set to {st.session_state[key]} days for all users.", icon=":material/check_circle:")
 
 # ---------------------------------------------------------------------------
@@ -55,7 +59,7 @@ with st.container(key="ar_banner", horizontal=True, vertical_alignment="center",
 # ---------------------------------------------------------------------------
 # Filters
 # ---------------------------------------------------------------------------
-MIN_CLV = [150_000, 200_000, 300_000, 400_000]
+MIN_CLV = repo.min_clv_options()
 MIN_DAYS = [threshold] + [d for d in (60, 90, 120, 180) if d > threshold]
 TIER_SCOPE = {"High / Platinum": None, "Platinum only": "Platinum", "High only": "High"}
 
@@ -63,7 +67,7 @@ with st.container(key="bar_ar", horizontal=True, vertical_alignment="center"):
     min_clv = ui.filter_select("Min CLV", MIN_CLV, "ar_min_clv", format_func=ui.ksh, width=225)
     min_days = ui.filter_select("Days Inactive", MIN_DAYS, "ar_days", format_func=lambda d: f"{d}+ days", width=235)
     scope = ui.filter_select("CLV Tier", list(TIER_SCOPE), "ar_scope", width=250)
-    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.BOOKING_CHANNELS, "ar_channel", width=290)
+    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.booking_channels(), "ar_channel", width=290)
     query = ui.search_box("ar_search")
     download_slot = st.container(width="content")
 

@@ -255,7 +255,8 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 def download_csv(label: str, df: pd.DataFrame, filename: str, key: str, primary: bool = True) -> None:
-    st.download_button(label, csv_bytes(df), file_name=filename, mime="text/csv", key=key,
+    # Built only when clicked: lists can hold tens of thousands of guests.
+    st.download_button(label, lambda: csv_bytes(df), file_name=filename, mime="text/csv", key=key,
                        icon=":material/download:", type="primary" if primary else "secondary",
                        on_click="ignore")
 

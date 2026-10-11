@@ -14,8 +14,8 @@ ui.page_header("Guest Segment Distribution", "Overview of predicted CLV tiers ac
 # ---------------------------------------------------------------------------
 with st.container(key="bar_seg", horizontal=True, vertical_alignment="center"):
     tier = ui.filter_select("CLV Tier", ["All Tiers"] + repo.TIERS, "seg_tier")
-    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.BOOKING_CHANNELS, "seg_channel", width=290)
-    gtype = ui.filter_select("Guest Type", ["All Types"] + repo.GUEST_TYPES, "seg_type", width=250)
+    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.booking_channels(), "seg_channel", width=290)
+    gtype = ui.filter_select("Guest Type", ["All Types"] + repo.guest_types(), "seg_type", width=250)
 
 df = repo.guests()
 if channel != "All Channels":
@@ -25,6 +25,7 @@ if gtype != "All Types":
 dim = set() if tier == "All Tiers" else set(repo.TIERS) - {tier}
 
 stats = repo.segment_characteristics(df)
+trend = repo.tier_trend()
 total = int(stats["guests"].fillna(0).sum())
 counts = stats["guests"].fillna(0).astype(int)
 share = (counts / total) if total else counts * 0
@@ -33,7 +34,7 @@ tone = {"High": "teal", "Medium": "sage", "Low": "sky"}
 icons = {"High": "arrow-trend-up", "Medium": "users", "Low": "users"}
 ui.kpi_row([
     ui.Kpi(f"{t}-Value Guests", f"{counts[t]:,}", f"{share[t]:.0%} of guests", icons[t], tone[t],
-           trend=repo.TIER_TREND[t][1], trend_dir=repo.TIER_TREND[t][0], dimmed=t in dim)
+           trend=trend[t][1], trend_dir=trend[t][0], dimmed=t in dim)
     for t in repo.TIERS
 ], filled=True)
 
