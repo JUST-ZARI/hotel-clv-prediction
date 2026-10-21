@@ -30,7 +30,7 @@ total = int(stats["guests"].fillna(0).sum())
 counts = stats["guests"].fillna(0).astype(int)
 share = (counts / total) if total else counts * 0
 
-tone = {"High": "teal", "Medium": "sage", "Low": "sky"}
+tone = {"High": "orange", "Medium": "sage", "Low": "sky"}
 icons = {"High": "arrow-trend-up", "Medium": "users", "Low": "users"}
 ui.kpi_row([
     ui.Kpi(f"{t}-Value Guests", f"{counts[t]:,}", f"{share[t]:.0%} of guests", icons[t], tone[t],
@@ -98,7 +98,7 @@ with ui.card("chars"):
 
 ui.css("""
 .seg-legend { display: flex; flex-direction: column; gap: 8px; }
-.seg-legend-row { display: grid; grid-template-columns: 1fr auto 48px; align-items: center; gap: 8px; font-size: 0.952rem; color: var(--ink-700); }
+.seg-legend-row { display: grid; grid-template-columns: 1fr auto 48px; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--ink-700); }
 .seg-legend-row span { display: inline-flex; align-items: center; gap: 8px; }
 .seg-legend-row i { font-size: 0.672rem; }
 .seg-legend-row b { font-weight: 600; color: var(--ink-900); font-variant-numeric: tabular-nums; }

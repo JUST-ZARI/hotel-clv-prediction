@@ -33,7 +33,7 @@ def render_sidebar(nav_pages, current: str, counts: dict[str, int] | None = None
     s = st.session_state
     counts = counts or {}
     with st.sidebar:
-        st.html(brand_lockup("Revenue Management"))
+        st.html(brand_lockup("Decision Support System"))
         st.html('<div class="ds-nav-label">Navigation</div>')
         for page in nav_pages:
             key = ("navon_" if page.url_path == current else "nav_") + page.url_path
