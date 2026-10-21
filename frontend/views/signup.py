@@ -15,8 +15,7 @@ def _submit() -> None:
     s = st.session_state
     full_name = " ".join((s.get("su_name") or "").split())
     email = auth.normalize_email(s.get("su_email"))
-    role = s.get("su_role")
-    token = (s.get("su_token") or "").strip()
+    code = (s.get("su_token") or "").strip()
     password = s.get("su_password") or ""
     confirm = s.get("su_confirm") or ""
 
@@ -28,10 +27,8 @@ def _submit() -> None:
         errors["email"] = "Enter your email address."
     elif not auth.is_valid_email(email):
         errors["email"] = "Enter a valid email address."
-    if role not in auth.ROLES:
-        errors["role"] = "Select your team."
-    if not token:
-        errors["token"] = "Enter the invite token you were given."
+    if not code:
+        errors["token"] = "Enter the invite code from your invitation email."
     if not all(ok for _, ok in auth.password_checks(password)):
         errors["password"] = "Password doesn't meet all the requirements."
     if not confirm:
@@ -42,26 +39,32 @@ def _submit() -> None:
         form.set(fields=errors)
         return
 
-    problem = auth.config_error(for_signup=True)
+    problem = auth.config_error()
     if problem:
         form.set(form=problem)
         return
 
-    # 2. Invite token must belong to the selected role.
+    # 2. The invite code must be the open invite for this email (single use, not expired).
     wait = auth.lockout_remaining("invite_token")
     if wait:
         mins = max(1, round(wait / 60))
-        form.set(form=f"Too many invalid invite tokens. Try again in about {mins} minute{'s' if mins > 1 else ''}.")
+        form.set(form=f"Too many invalid invite codes. Try again in about {mins} minute{'s' if mins > 1 else ''}.")
         return
-    if not auth.verify_invite_token(role, token):
+    try:
+        invite = auth.verify_invite(email, code)
+    except Exception:
+        form.set(form="We couldn't check your invite right now. Please try again.")
+        return
+    if invite is None:
         auth.record_failure("invite_token")
-        form.set(fields={"token": f"This invite token is not valid for {auth.ROLES[role]}."})
+        form.set(fields={"token": "This code is not valid for this email, has been used, or has expired. "
+                                  "Ask your system administrator for a new invitation."})
         return
     auth.clear_failures("invite_token")
 
     # 3. Supabase Auth → USERS table.
     try:
-        needs_confirmation = auth.sign_up(full_name, email, password, role)
+        needs_confirmation = auth.sign_up(full_name, email, password, invite)
     except auth.AuthFailure as err:
         if err.field:
             form.set(fields={err.field: err.message})
@@ -107,7 +110,6 @@ with st.container(key="auth_card_wide"):
         <div class="auth-head">
             <div class="auth-mark">{icon("user-plus")}</div>
             <div class="auth-title">Create your account</div>
-            <div class="auth-sub"> Use the token issued to your team for registration.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -127,16 +129,10 @@ with st.container(key="auth_card_wide"):
                       placeholder="name@hotel.com", on_change=_clear, args=("email",))
         field_error(form.field("email"))
 
-    col_role, col_token = st.columns(2, gap="small")
-    with col_role, st.container(key=_wrap("role")):
-        st.selectbox("Team", options=list(auth.ROLES), format_func=auth.ROLES.get,
-                     index=None, placeholder="Select your team", key="su_role",
-                     on_change=_clear, args=("role",))
-        field_error(form.field("role"))
-    with col_token, st.container(key=_wrap("token")):
-        st.text_input("Invite token", key="su_token", type="password",
-                      icon=":material/key:", placeholder="Paste token",
-                      autocomplete="off", on_change=_clear, args=("token",))
+    with st.container(key=_wrap("token")):
+        st.text_input("Invite code", key="su_token", icon=":material/key:", placeholder="e.g. K7QX-M2PD-9TAZ",
+                      autocomplete="off", on_change=_clear, args=("token",),
+                      help="Your role comes from the invitation. Codes work once and expire after 7 days.")
         field_error(form.field("token"))
 
     @st.fragment
@@ -174,8 +170,3 @@ with st.container(key="auth_card_wide"):
         form.reset()
         st.switch_page(auth.LOGIN_PAGE)
 
-st.markdown(
-    f'<div class="auth-foot">{icon("shield-halved")}'
-    "Invite tokens are issued per team.</div>",
-    unsafe_allow_html=True,
-)
