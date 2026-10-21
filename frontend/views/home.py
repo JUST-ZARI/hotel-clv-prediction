@@ -282,6 +282,18 @@ st.html("""
 }
 @media (max-width: 640px) {
     .st-key-home_nav .ds-brand-sub { display: none; }
+    .st-key-home_nav { flex-wrap: nowrap !important; gap: 6px !important; }
+    .st-key-home_nav .ds-brand-name { white-space: nowrap; font-size: 1.15rem; }
+    .st-key-home_nav .ds-brand-mark { width: 32px; height: 32px; }
+    .st-key-home_nav button { min-height: 34px !important; padding: 0 10px !important; }
+    .st-key-home_nav button p { font-size: 0.85rem !important; }
+    .st-key-home_hero_left { padding: 28px 22px !important; border-radius: 16px; }
+    .hero-desc { font-size: 1rem; }
+    .ds-head-t { font-size: 1.8rem !important; }
+    .ds-step { padding: 12px 14px; gap: 12px; }
+    .ds-step-ico { width: 42px; height: 42px; font-size: 1rem; }
+    .ds-step-go { display: none; }
+    .ds-step-t { font-size: 1.08rem; }
     .feats { grid-template-columns: 1fr; }
     .feats > div { border-left: none !important; border-top: 1px solid var(--line); }
     .feats > div:first-child { border-top: none; }

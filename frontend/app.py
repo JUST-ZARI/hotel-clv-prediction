@@ -5,8 +5,11 @@ from data import repository as repo
 from style import inject_global_css
 from utils import init_session_state, render_sidebar
 
+# On phones the sidebar would cover the whole screen, so it starts closed there (opened with the ☰ button).
+_ua = (st.context.headers.get("User-Agent") or "").lower()
+_mobile = any(k in _ua for k in ("iphone", "android", "mobile", "ipod"))
 st.set_page_config(page_title="Hotel CLV", page_icon=":material/apartment:", layout="wide",
-                   initial_sidebar_state=240)
+                   initial_sidebar_state="collapsed" if _mobile else 240)
 init_session_state()
 inject_global_css()
 if not auth.config_error():
