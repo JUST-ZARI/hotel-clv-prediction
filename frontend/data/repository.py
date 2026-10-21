@@ -17,8 +17,11 @@ signed-in staff may read all guests); action logs and settings are read fresh.
 
 from __future__ import annotations
 
+import logging
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -41,7 +44,9 @@ TIER_STRATEGY = {
     "Low": "Cost-efficient engagement / win-back offers",
 }
 
-PAGE_ROWS = 1000      # Supabase returns at most 1,000 rows per request
+log = logging.getLogger(__name__)
+
+PAGE_ROWS = 1000     # Supabase returns at most 1,000 rows per request
 FETCH_THREADS = 8
 # Lists and charts need only these columns (kept small: they are loaded for every guest).
 # Guest Lookup reads one guest's full row with get_guest().
@@ -153,16 +158,70 @@ def _fetch_all(base_url: str, headers: dict, table: str, columns: str, run_at: s
     return pd.DataFrame([row for p in pages for row in p])
 
 
+# The guest list of each run is also stored as one compressed file (written by
+# supabase/load_predictions.py). Downloading it is a single request (~2 MB)
+# instead of 120+ pages of rows, and a copy on disk makes restarts instant.
+SNAPSHOT_BUCKET = "ml-models"
+SNAPSHOT_COLUMNS = tuple(dict.fromkeys(c.strip() for c in f"{GUEST_COLUMNS}, {PREDICTION_COLUMNS}".split(",")))
+SNAPSHOT_CATEGORIES = ("booking_channel", "guest_type", "tier_badge", "recommended_action")
+SNAPSHOT_DIR = Path(tempfile.gettempdir()) / "hotel-clv-snapshots"
+
+
+def snapshot_path(run_at: str) -> str:
+    return f"snapshots/{pd.Timestamp(run_at).tz_convert('UTC'):%Y%m%dT%H%M%SZ}.parquet"
+
+
+def _snapshot(run_at: str) -> pd.DataFrame | None:
+    """This run's guest list from the disk copy, else from Storage; None if no snapshot exists.
+
+    Storage is read with the server key: the bucket is private and the file
+    holds only what every signed-in user may already read from the tables.
+    """
+    path = snapshot_path(run_at)
+    local = SNAPSHOT_DIR / Path(path).name
+    if not local.exists():
+        try:
+            data = auth._service_client().storage.from_(SNAPSHOT_BUCKET).download(path)
+        except Exception:   # noqa: BLE001  (missing file / storage unreachable → use the tables)
+            log.warning("No dashboard snapshot at %s; loading from the tables", path)
+            return None
+        SNAPSHOT_DIR.mkdir(exist_ok=True)
+        tmp = local.with_suffix(f".{threading.get_ident()}.part")   # prefetch and a page may race
+        tmp.write_bytes(data)
+        tmp.replace(local)
+    return pd.read_parquet(local)
+
+
+@st.cache_resource(show_spinner=False)
+def prefetch_snapshot() -> None:
+    """Start downloading the newest run's snapshot to disk when the server starts (once per process),
+    so the first sign-in does not wait for it. Uses the server key; nothing is shown to anyone."""
+    def work() -> None:
+        try:
+            res = auth._service_client().table("model_runs").select("predicted_at") \
+                .order("predicted_at", desc=True).limit(1).execute()
+            rows = _rows(res)
+            if rows:
+                _snapshot(rows[0]["predicted_at"])
+        except Exception:   # noqa: BLE001  (best effort: the page loads it on demand otherwise)
+            log.warning("Snapshot prefetch failed", exc_info=True)
+
+    threading.Thread(target=work, daemon=True, name="snapshot-prefetch").start()
+
+
 @st.cache_resource(ttl=3600, max_entries=2, show_spinner="Loading guest predictions…")
 def _guest_frame(_client, run_at: str, as_of: str) -> pd.DataFrame:
     """GUESTS joined to their prediction in run `run_at`. Shared read-only: never modify it."""
-    conn = (str(_client.postgrest.base_url), dict(_client.postgrest.session.headers))
-    with ThreadPoolExecutor(2) as pool:     # both tables at once
-        g = pool.submit(_fetch_all, *conn, "guests", GUEST_COLUMNS)
-        p = pool.submit(_fetch_all, *conn, "clv_predictions", PREDICTION_COLUMNS, run_at)
-        g, p = g.result(), p.result()
-    df = _prepare(g.merge(p, on="guest_id", how="inner", validate="one_to_one"), as_of)
-    for col in ("booking_channel", "guest_type", "clv_tier", "tier_badge", "recommended_action"):
+    df = _snapshot(run_at)
+    if df is None:
+        conn = (str(_client.postgrest.base_url), dict(_client.postgrest.session.headers))
+        with ThreadPoolExecutor(2) as pool:     # both tables at once
+            g = pool.submit(_fetch_all, *conn, "guests", GUEST_COLUMNS)
+            p = pool.submit(_fetch_all, *conn, "clv_predictions", PREDICTION_COLUMNS, run_at)
+            g, p = g.result(), p.result()
+        df = g.merge(p, on="guest_id", how="inner", validate="one_to_one")
+    df = _prepare(df, as_of)
+    for col in ("clv_tier", *SNAPSHOT_CATEGORIES):
         df[col] = df[col].astype("category")
     return df.sort_values("predicted_clv", ascending=False, ignore_index=True)
 
@@ -174,15 +233,19 @@ def _prepare(df: pd.DataFrame, as_of: str) -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col])
     df["predicted_clv"] = df["predicted_clv"].round().astype(int)
     df["avg_daily_rate"] = df["avg_daily_rate"].round().astype(int)
-    df["clv_tier"] = df["tier_badge"].replace({"Platinum": "High"})
+    df["clv_tier"] = df["tier_badge"].astype(str).replace({"Platinum": "High"})
     df["days_since_last_stay"] = (pd.Timestamp(as_of) - df["last_stay_date"]).dt.days.astype(int)
     return df
 
 
 def guests() -> pd.DataFrame:
-    """Every guest with their newest prediction, highest predicted CLV first. Read-only."""
+    """Every guest with their newest prediction, highest predicted CLV first. Read-only.
+
+    Revenue Manager overrides replace the model's recommended action, and guests
+    flagged as priority are always on the Action Board (see RM_DECISIONS below).
+    """
     run = _run()
-    return _guest_frame(_client(), run["predicted_at"], run["as_of_date"])
+    return _effective(_guest_frame(_client(), run["predicted_at"], run["as_of_date"]), run["predicted_at"])
 
 
 def booking_channels() -> list[str]:
@@ -258,7 +321,17 @@ def get_guest(guest_id: str) -> pd.Series | None:
     """One guest with every stored detail and their newest prediction (incl. top_drivers)."""
     run = _run()
     row = _guest_row(_client(), guest_id, run["predicted_at"], run["as_of_date"])
-    return None if row is None else pd.Series(row)
+    if row is None:
+        return None
+    row = dict(row)                                   # cached: never modify the original
+    decision = guest_decision(guest_id)
+    row["model_action"] = row["recommended_action"]
+    row["is_priority"] = decision["priority"] is not None
+    row["decision"] = decision
+    if decision["override"]:
+        row["recommended_action"] = decision["override"]["new_action"]
+        row["recommended_action_reason"] = f"Set by the Revenue Manager: {decision['override']['reason']}"
+    return pd.Series(row)
 
 
 def normalize_guest_id(raw: str) -> str:
@@ -374,13 +447,17 @@ def settings_meta() -> dict:
 # ---------------------------------------------------------------------------
 
 LOG_COLUMNS = ("log_id, user_id, guest_id, prediction_id, action_taken, action_status, delivery_channel, "
-               "logged_at, outcome, outcome_at")
+               "logged_at, outcome, outcome_at, recipient_masked")
 
 
 def action_logs(guest_id: str) -> pd.DataFrame:
     client = _client()
-    res = client.table("action_logs").select(LOG_COLUMNS).eq("guest_id", guest_id) \
-        .order("logged_at", desc=True).execute()
+    try:
+        res = client.table("action_logs").select(LOG_COLUMNS).eq("guest_id", guest_id) \
+            .order("logged_at", desc=True).execute()
+    except APIError:     # 005 not run yet
+        res = client.table("action_logs").select(LOG_COLUMNS.rsplit(",", 1)[0]).eq("guest_id", guest_id) \
+            .order("logged_at", desc=True).execute()
     logs = pd.DataFrame(_rows(res), columns=[c.strip() for c in LOG_COLUMNS.split(",")])
     staff = _staff(client)
     logs["user_name"] = logs["user_id"].map(lambda u: staff.get(u, {}).get("full_name", ""))
@@ -390,10 +467,14 @@ def action_logs(guest_id: str) -> pd.DataFrame:
 
 
 def log_action(guest_id: str, action_taken: str, delivery_channel: str,
-               action_status: str = "Completed") -> None:
-    """Record an action as the signed-in user. Completed actions start with outcome 'Waiting'."""
+               action_status: str = "Completed", recipient_masked: str | None = None,
+               provider_message_id: str | None = None) -> None:
+    """Record an action as the signed-in user. Completed actions start with outcome 'Waiting'.
+
+    recipient_masked / provider_message_id are set when a real email or SMS was sent (005).
+    """
     g = get_guest(guest_id)
-    _client().table("action_logs").insert({
+    row = {
         "user_id": st.session_state.get("user_id"),
         "guest_id": guest_id,
         "prediction_id": None if g is None else g["prediction_id"],
@@ -401,7 +482,23 @@ def log_action(guest_id: str, action_taken: str, delivery_channel: str,
         "action_status": action_status,
         "delivery_channel": delivery_channel,
         "outcome": "Waiting" if action_status == "Completed" else None,
-    }).execute()
+    }
+    if recipient_masked:
+        row.update(recipient_masked=recipient_masked, provider_message_id=provider_message_id)
+    _client().table("action_logs").insert(row).execute()
+    _recent_completed.clear()
+
+
+def sends_last_24h() -> int:
+    """Emails / SMS this user actually sent in the last 24 hours (for the daily limit)."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        res = (_client().table("action_logs").select("log_id", count=CountMethod.exact).limit(0)
+               .eq("user_id", st.session_state.get("user_id")).gte("logged_at", since)
+               .not_.is_("recipient_masked", "null").execute())
+    except APIError:     # 005 not run yet: no sends can have been recorded
+        return 0
+    return res.count or 0
 
 
 def set_outcome(log_id: str, outcome: str) -> None:
@@ -414,6 +511,16 @@ def set_outcome(log_id: str, outcome: str) -> None:
            .eq("log_id", log_id).execute())
     if not _rows(res):
         raise PermissionError("Only the Marketing Team can record outcomes.")
+    _recent_completed.clear()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _recent_completed(_client, days: int) -> pd.DataFrame:
+    """Completed actions of the last `days` days (cleared whenever an action or outcome is saved)."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    res = (_client.table("action_logs").select("guest_id, outcome").eq("action_status", "Completed")
+           .gte("logged_at", since).execute())
+    return pd.DataFrame(_rows(res), columns=["guest_id", "outcome"])
 
 
 def outcome_summary(days: int = 30) -> dict:
@@ -422,10 +529,7 @@ def outcome_summary(days: int = 30) -> dict:
     value_retained is the predicted CLV of guests who came back — a prediction,
     not booked revenue.
     """
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    res = (_client().table("action_logs").select("guest_id, outcome").eq("action_status", "Completed")
-           .gte("logged_at", since).execute())
-    recent = pd.DataFrame(_rows(res), columns=["guest_id", "outcome"])
+    recent = _recent_completed(_client(), days)
     contacted = recent["guest_id"].nunique()
     came_back = recent.loc[recent["outcome"] == "Came back", "guest_id"].unique()
     no_return = recent.loc[recent["outcome"] == "Didn't come back", "guest_id"].unique()
@@ -440,3 +544,148 @@ def outcome_summary(days: int = 30) -> dict:
         "return_rate": (len(came_back) / contacted) if contacted else 0.0,
         "value_retained": int(clv.reindex(came_back).fillna(0).sum()),
     }
+
+
+# ---------------------------------------------------------------------------
+# RM_DECISIONS + SETTINGS_HISTORY (006) — Revenue Manager decisions kept as
+# feedback for future retraining. Append-only: the newest decision per guest wins.
+# ---------------------------------------------------------------------------
+
+ACTIONS = ["Personal call from manager", "Send VIP win-back offer", "Priority retention campaign",
+           "Email loyalty bonus", "VIP concierge outreach", "Upsell suite package", "Send loyalty offer",
+           "Targeted upsell offer", "Re-engagement email", "Cost-efficient engagement", "Win-back discount"]
+DECISION_COLUMNS = ["decision_id", "guest_id", "prediction_id", "user_id", "decision_type", "original_action",
+                    "new_action", "reason", "decided_at"]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _decisions(_client) -> pd.DataFrame | None:
+    """All Revenue Manager decisions, oldest first (None if 006 has not been run)."""
+    try:
+        res = _client.table("rm_decisions").select(", ".join(DECISION_COLUMNS)).order("decided_at").execute()
+    except APIError:
+        return None
+    df = pd.DataFrame(_rows(res), columns=DECISION_COLUMNS)
+    df["decided_at"] = pd.to_datetime(df["decided_at"], utc=True).dt.tz_convert("Africa/Nairobi")
+    return df
+
+
+def decisions_enabled() -> bool:
+    return _decisions(_client()) is not None
+
+
+def _decision_state(df: pd.DataFrame | None) -> dict[str, dict]:
+    """guest_id → {"override": row | None, "priority": row | None} after replaying decisions in order."""
+    state: dict[str, dict] = {}
+    if df is None:
+        return state
+    for r in df.to_dict("records"):
+        s = state.setdefault(r["guest_id"], {"override": None, "priority": None})
+        kind = r["decision_type"]
+        if kind == "Override action":
+            s["override"] = r
+        elif kind == "Clear override":
+            s["override"] = None
+        elif kind == "Flag priority":
+            s["priority"] = r
+        elif kind == "Remove priority":
+            s["priority"] = None
+    return {g: s for g, s in state.items() if s["override"] or s["priority"]}
+
+
+@st.cache_resource(max_entries=4, show_spinner=False)
+def _apply_decisions(_base: pd.DataFrame, run_at: str, version: str, _state: dict) -> pd.DataFrame:
+    """Guest list with Revenue Manager overrides and priority flags applied (cached per decision version)."""
+    df = _base.copy()
+    df["model_action"] = df["recommended_action"]
+    df["is_priority"] = False
+    overrides = {g: s["override"]["new_action"] for g, s in _state.items() if s["override"]}
+    priority = {g for g, s in _state.items() if s["priority"]}
+    if overrides:
+        actions = df["recommended_action"].astype(str)
+        hit = df["guest_id"].isin(overrides)
+        actions[hit] = df.loc[hit, "guest_id"].map(overrides)
+        df["recommended_action"] = actions.astype("category")
+    if priority:
+        df["is_priority"] = df["guest_id"].isin(priority)
+        df["in_action_queue"] = df["in_action_queue"] | df["is_priority"]   # flagged guests always get an action
+    return df
+
+
+def _effective(base: pd.DataFrame, run_at: str) -> pd.DataFrame:
+    decisions = _decisions(_client())
+    state = _decision_state(decisions)
+    if not state:
+        return base
+    version = f"{len(decisions)}:{decisions['decided_at'].max()}"
+    return _apply_decisions(base, run_at, version, state)
+
+
+def guest_decision(guest_id: str) -> dict:
+    """The guest's active override / priority flag: {"override": row | None, "priority": row | None}."""
+    return _decision_state(_decisions(_client())).get(guest_id, {"override": None, "priority": None})
+
+
+def decision_history(guest_id: str) -> pd.DataFrame:
+    df = _decisions(_client())
+    if df is None:
+        return pd.DataFrame(columns=DECISION_COLUMNS + ["user_name"])
+    out = df[df["guest_id"] == guest_id].sort_values("decided_at", ascending=False).copy()
+    staff = _staff(_client())
+    out["user_name"] = out["user_id"].map(lambda u: staff.get(u, {}).get("full_name", ""))
+    return out
+
+
+def record_decision(guest_id: str, decision_type: str, reason: str, new_action: str | None = None) -> None:
+    """Revenue Manager only — enforced by RLS. Raises ValueError for bad input."""
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValueError("Give a short reason (at least 5 characters).")
+    if decision_type == "Override action" and new_action not in ACTIONS:
+        raise ValueError("Choose the action to use instead.")
+    g = get_guest(guest_id)
+    _client().table("rm_decisions").insert({
+        "guest_id": guest_id,
+        "prediction_id": None if g is None else g["prediction_id"],
+        "user_id": st.session_state.get("user_id"),
+        "decision_type": decision_type,
+        "original_action": None if g is None else g.get("model_action", g["recommended_action"]),
+        "new_action": new_action if decision_type == "Override action" else None,
+        "reason": reason,
+    }).execute()
+    _decisions.clear()
+
+
+def record_priority(guest_ids: list[str], reason: str) -> int:
+    """Flag several guests as priority in one insert (At-Risk → Marketing). Returns how many were saved."""
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValueError("Give a short reason (at least 5 characters).")
+    if not guest_ids:
+        return 0
+    client = _client()
+    preds = _rows(client.table("clv_predictions").select("guest_id, prediction_id, recommended_action")
+                  .eq("predicted_at", _run()["predicted_at"]).in_("guest_id", list(guest_ids)).execute())
+    by_guest = {p["guest_id"]: p for p in preds}
+    uid = st.session_state.get("user_id")
+    rows = [{"guest_id": g, "prediction_id": by_guest.get(g, {}).get("prediction_id"), "user_id": uid,
+             "decision_type": "Flag priority", "original_action": by_guest.get(g, {}).get("recommended_action"),
+             "reason": reason} for g in guest_ids]
+    client.table("rm_decisions").insert(rows).execute()
+    _decisions.clear()
+    return len(rows)
+
+
+def settings_history(key: str = "at_risk_days", limit: int = 10) -> pd.DataFrame:
+    """Recent changes to a shared setting, newest first (empty if 006 has not been run)."""
+    cols = ["old_value", "new_value", "changed_by", "changed_at"]
+    try:
+        res = (_client().table("settings_history").select(", ".join(cols)).eq("key", key)
+               .order("changed_at", desc=True).limit(limit).execute())
+    except APIError:
+        return pd.DataFrame(columns=cols + ["changed_by_name"])
+    df = pd.DataFrame(_rows(res), columns=cols)
+    df["changed_at"] = pd.to_datetime(df["changed_at"], utc=True).dt.tz_convert("Africa/Nairobi")
+    staff = _staff(_client())
+    df["changed_by_name"] = df["changed_by"].map(lambda u: staff.get(u, {}).get("full_name", "") if u else "")
+    return df
