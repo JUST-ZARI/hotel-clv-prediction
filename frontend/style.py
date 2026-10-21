@@ -717,8 +717,49 @@ html { scroll-behavior: smooth; }
 }
 @media (max-width: 640px) {
     .stMain [data-testid="stMainBlockContainer"] { padding: 16px !important; }
-    .ds-kpi-grid { grid-template-columns: 1fr; }
+    .stMain [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] { gap: 14px; }
     .ds-page-title { font-size: 1.5rem !important; }
+    .ds-page-sub { font-size: 0.95rem; }
+    .ds-page-head { min-height: 0; }
+
+    /* Cards: less padding */
+    [class*="st-key-card_"] { padding: 16px !important; }
+    .ds-card-title { font-size: 1.12rem !important; }
+    .ds-impact { padding: 10px 12px; gap: 8px 0; }
+    .ds-impact-k { width: 100%; justify-content: center; margin-right: 0; }
+
+    /* Tables keep one row per guest and scroll sideways instead of stacking cells */
+    [class*="st-key-tbl_"] { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+    [class*="st-key-tblhead_"], [class*="st-key-tblrow_"] { min-width: 640px; }
+    [class*="st-key-tbl_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+    [class*="st-key-tbl_"] [data-testid="stColumn"] { min-width: 0 !important; }
+    .ds-table { display: block; overflow-x: auto; white-space: nowrap; }
+
+    /* Filters and search use the full width */
+    [class*="st-key-bar_"] { flex-direction: column; align-items: stretch !important; }
+    [class*="st-key-flt_"], [class*="st-key-flt_"] .stSelectbox,
+    [class*="st-key-flt_"] [data-testid="stElementContainer"],
+    [data-testid="stLayoutWrapper"]:has(> [class*="st-key-flt_"]),
+    [data-testid="stLayoutWrapper"]:has(> [class*="st-key-srch_"]) { width: 100% !important; max-width: 100% !important; flex: 1 1 auto; }
+    [class*="st-key-bar_"] [data-testid="stDownloadButton"], [class*="st-key-bar_"] [data-testid="stDownloadButton"] button { width: 100% !important; }
+
+    /* Pagination wraps onto a second line when needed */
+    [class*="st-key-pager_"] { flex-wrap: wrap; row-gap: 8px; }
+    [class*="st-key-pager_"] > [data-testid="stElementContainer"]:first-child { width: 100% !important; flex: 1 1 100% !important; }
+
+    /* KPI cards two per row, figures scaled to fit */
+    .ds-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ds-kpi { flex-direction: column; gap: 8px; padding: 12px; }
+    .ds-kpi-ico { width: 34px; height: 34px; font-size: 0.85rem; }
+    .ds-kpi-label { font-size: 0.88rem; }
+    .ds-kpi-value { font-size: 1.3rem; margin-top: 2px; }
+    .ds-kpi-caption { font-size: 0.8rem; }
+
+    /* Stacked rows (e.g. the Administration lists) read as separate cards */
+    [class*="st-key-card_adm_"] [data-testid="stHorizontalBlock"] {
+        padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line);
+    }
+    button[data-variant="segmented_control"] { font-size: 0.85rem !important; }
 }
 </style>
 """
@@ -855,7 +896,10 @@ _AUTH_CSS = """
     .st-key-auth_topbar .ds-brand { visibility: visible; }
 }
 @media (max-width: 560px) {
-    [class*="st-key-auth_card"] { padding: 26px 20px 22px !important; margin-top: 8px; }
+    [class*="st-key-auth_card"] { padding: 22px 18px 20px !important; margin-top: 14px; }
+    .st-key-auth_topbar { padding: 14px 0 0 !important; }
+    .auth-title { font-size: 1.75rem; }
+    .auth-sub { font-size: 0.98rem; }
     .pw-rules { grid-template-columns: 1fr; }
 }
 </style>
