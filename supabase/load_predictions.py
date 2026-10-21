@@ -11,7 +11,8 @@ What it writes
     guests           one row per guest (upsert by guest_id)
     model_runs       one row for this prediction run
     clv_predictions  one row per guest for this run (re-running replaces the run)
-    ml-models bucket xgboost.json, random_forest.pkl and the metadata files
+    ml-models bucket xgboost.json, random_forest.pkl, the metadata files and
+                     snapshots/<run>.parquet — the guest list the dashboard downloads in one go
 
 Only the newest KEEP_RUNS runs are kept so the free-tier database stays small.
 """
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "frontend"))
 
 import auth  # noqa: E402  (reads .streamlit/secrets.toml through st.secrets)
+from data import repository as repo  # noqa: E402  (snapshot name + columns the dashboard expects)
 
 PREDICTIONS = ROOT / "data/processed/guest_predictions.csv.gz"
 CLEANED = ROOT / "data/processed/cleaned_dataset.csv"
@@ -64,9 +66,22 @@ def send(label: str, rows: list[dict], write) -> None:
     print(f"  ({time.time() - start:.0f}s)")
 
 
+def upload_snapshot(admin, df: pd.DataFrame, run_at: str) -> None:
+    """The guest-list columns of this run as one compressed Parquet file (~2 MB)."""
+    snap = df[list(repo.SNAPSHOT_COLUMNS)].copy()
+    for col in repo.SNAPSHOT_CATEGORIES:
+        snap[col] = snap[col].astype("category")
+    data = snap.to_parquet(index=False, compression="zstd")
+    admin.storage.from_(BUCKET).upload(repo.snapshot_path(run_at), data,
+                                        {"content-type": "application/octet-stream", "upsert": "true"})
+    print(f"  uploaded dashboard snapshot ({len(data) / 1e6:.1f} MB) to {BUCKET}/{repo.snapshot_path(run_at)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-models", action="store_true", help="skip uploading model files to Storage")
+    parser.add_argument("--snapshot-only", action="store_true",
+                        help="only (re)upload the dashboard snapshot for the run in guest_predictions.csv.gz")
     args = parser.parse_args()
 
     problem = auth.config_error()
@@ -88,6 +103,9 @@ def main() -> int:
         print("guest_predictions.csv.gz holds more than one run; re-run notebook 08.")
         return 1
     print(f"Run {run_at}: {len(df):,} guests, model {summary['winner']}")
+    if args.snapshot_only:
+        upload_snapshot(admin, df, run_at)
+        return 0
 
     # 1. guests (upsert keeps action logs that point at them)
     send("guests", records(df[GUEST_COLS]),
@@ -116,7 +134,10 @@ def main() -> int:
         admin.table("model_runs").delete().eq("predicted_at", old).execute()
         print(f"  removed old run {old}")
 
-    # 5. model files → private bucket
+    # 5. dashboard snapshot → private bucket (one small file the app downloads instead of 121k rows)
+    upload_snapshot(admin, df, run_at)
+
+    # 6. model files → private bucket
     if not args.no_models:
         store = admin.storage.from_(BUCKET)
         for name in MODEL_FILES:
@@ -125,7 +146,7 @@ def main() -> int:
                          {"content-type": "application/octet-stream", "upsert": "true"})
             print(f"  uploaded {Path(name).name} ({path.stat().st_size / 1e6:.1f} MB) to {BUCKET}")
 
-    # 6. check
+    # 7. check
     count = admin.table("clv_predictions").select("prediction_id", count=CountMethod.exact).eq("predicted_at", run_at) \
         .limit(0).execute().count
     ok = count == len(df)

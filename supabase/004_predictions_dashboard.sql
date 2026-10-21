@@ -14,10 +14,7 @@ alter table public.guests
     add column if not exists room_type          text,      -- room type of the guest's booking (A–L)
     add column if not exists meal_plan          text,
     add column if not exists booking_canceled   boolean,   -- was that booking cancelled?
-    add column if not exists first_booking_year integer,
-    -- Contact permission. False for every guest in the historical data: the app
-    -- must never message a guest who has not agreed to it.
-    add column if not exists marketing_consent  boolean not null default false;
+    add column if not exists first_booking_year integer;
 
 
 -- =========================================================
