@@ -104,7 +104,7 @@ publishable_key = ""
 secret_key = ""
 
 [app]
-base_url = "http://localhost:8502"   # the dashboard's address, used in invitation emails
+base_url = "http://localhost:8501"   # the dashboard's address, used in invitation emails
 
 [messaging]
 gmail_address = ""

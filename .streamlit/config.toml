@@ -11,9 +11,6 @@ baseRadius = "8px"
 [client]
 toolbarMode = "minimal"
 
-[server]
-port = 8502
-
 [browser]
 # Streamlit's usage statistics (webhooks.fivetran.com): off for privacy and a clean console.
 gatherUsageStats = false
