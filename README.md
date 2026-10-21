@@ -94,8 +94,27 @@ to `008_drop_marketing_consent.sql`. They create the tables and the access rules
 
 ### 3. Add your keys
 
-Copy `.streamlit/secrets.example.toml` to `.streamlit/secrets.toml` and fill in your Supabase, Gmail and
-Africa's Talking details. `secrets.toml` is ignored by Git, so your keys stay on your computer.
+Create a file called `.streamlit/secrets.toml` and fill in your own values below. This file is ignored by Git,
+so your keys stay on your computer.
+
+```toml
+[supabase]
+url = ""
+publishable_key = ""
+secret_key = ""
+
+[app]
+base_url = "http://localhost:8502"   # the dashboard's address, used in invitation emails
+
+[messaging]
+gmail_address = ""
+gmail_app_password = ""              # a Gmail app password, not your normal password
+sms_provider = "africastalking"
+africastalking_username = "sandbox"
+africastalking_api_key = ""
+africastalking_sender_id = ""
+daily_limit = 20                     # messages each staff member may send per day
+```
 
 ### 4. Install and load the predictions
 
@@ -154,7 +173,6 @@ hotel-clv-prediction/
 │   └── requirements.txt
 │
 ├── .streamlit/
-│   ├── config.toml
-│   └── secrets.example.toml
+│   └── config.toml
 │
 └── README.md
