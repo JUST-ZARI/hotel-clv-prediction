@@ -33,30 +33,28 @@ The system is designed to:
 
 ## Dashboard
 
-The dashboard provides role-specific views for two user groups.
+Each user only sees the pages for their role.
 
 ### Revenue Manager
 
-- Action Board
-- Guest Lookup
-- At-Risk Guests
-- Guest Segments
-- Predicted CLV information
-- CLV tier information
-- Guest data export
-- At-risk threshold management
+- Action Board, Guest Lookup and Segments
+- At-Risk Guests, including changing the at-risk threshold and sending guests to Marketing as priority cases
+- Predict a Booking, to get the predicted CLV of a new or returning booking
+- Overriding a guest's recommended action, with a reason
+- Exporting guest data as CSV
 
 ### Marketing Team
 
-- Action Board
-- Guest Lookup
-- Guest Segments
-- At-Risk Guests
-- Recommended actions
-- Action execution
-- Action logging
+- Action Board, Guest Lookup and Segments
+- Sending the recommended action to a guest by email or SMS
+- Recording whether the guest came back
 
-The dashboard is designed as a **business analytics and decision-support interface**, rather than a hotel booking system.
+### System Administrator
+
+- Inviting staff, changing roles and deactivating accounts
+- Checking system health (the administrator cannot see guest data)
+
+The dashboard is a **decision-support tool** for hotel staff, not a booking system.
 
 ## Machine Learning
 
@@ -77,41 +75,86 @@ Each record is one guest with a unique `guest_id`. The target is an **Estimated 
 repeat-booking indicators), standardised to Kenyan Shillings. See [docs/data_pipeline.md](docs/data_pipeline.md)
 for the notebook steps, category translations, Guest ID and CLV definition.
 
+## How to Run
+
+You will need Python 3.12 or newer, a free [Supabase](https://supabase.com) project, a Gmail account with an
+app password (for emails) and an [Africa's Talking](https://africastalking.com) account (for SMS; the free
+sandbox works for testing).
+
+### 1. Build the model (optional)
+
+The trained model and its predictions are already in `models/`, `results/` and `data/processed/`, so you can
+skip this step. To rebuild them, open the notebooks in Google Colab and run them in order, from
+`01_harmonize_dataset1.ipynb` to `08_evaluate_and_predict.ipynb`. Each notebook saves its output for the next one.
+
+### 2. Set up the database
+
+In your Supabase project, open the **SQL Editor** and run the files in `supabase/` in order, from `001_users.sql`
+to `008_drop_marketing_consent.sql`. They create the tables and the access rules for each role.
+
+### 3. Add your keys
+
+Copy `.streamlit/secrets.example.toml` to `.streamlit/secrets.toml` and fill in your Supabase, Gmail and
+Africa's Talking details. `secrets.toml` is ignored by Git, so your keys stay on your computer.
+
+### 4. Install and load the predictions
+
+```bash
+python -m venv frontend/.venv
+frontend/.venv/Scripts/pip install -r frontend/requirements.txt
+frontend/.venv/Scripts/python supabase/load_predictions.py
+```
+
+(On macOS or Linux, use `frontend/.venv/bin/` instead of `frontend/.venv/Scripts/`.)
+
+### 5. Check that everything works
+
+```bash
+frontend/.venv/Scripts/python supabase/verify_setup.py
+```
+
+This tests the tables, the access rules and the loaded predictions, then removes its test data.
+All checks should pass.
+
+### 6. Create the first administrator and start the dashboard
+
+```bash
+frontend/.venv/Scripts/python supabase/create_admin_invite.py you@example.com
+frontend/.venv/Scripts/streamlit run frontend/app.py
+```
+
+The first command emails an invite code. Open the dashboard, choose **Create an account**, and sign up with
+that code. As the administrator you can then invite the Revenue Manager and the Marketing Team from the
+**Administration** page.
+
 ## Project Structure
 
 ```text
 hotel-clv-prediction/
 │
-├── frontend/
-│   ├── app.py
-│   ├── auth.py
-│   ├── style.py
-│   ├── components.py
-│   ├── charts.py
-│   ├── utils.py
-│   │
-│   ├── data/
-│   │   ├── mock_data.py
-│   │   └── repository.py
-│   │
-│   └── views/
-│       ├── home.py
-│       ├── login.py
-│       ├── signup.py
-│       ├── action_board.py
-│       ├── guest_lookup.py
-│       ├── segments.py
-│       └── at_risk_guests.py
+├── notebooks/              # 01–08: data preparation, training and evaluation
+├── data/                   # raw Kaggle datasets and processed outputs
+├── models/                 # trained Random Forest and XGBoost models
+├── results/                # metrics, test predictions and charts
+├── docs/                   # data pipeline notes and design diagrams
 │
 ├── supabase/
-│   ├── 001_users.sql
-│   ├── 002_app_tables.sql
-│   ├── 003_outcomes_settings.sql
-│   └── verify_setup.py
+│   ├── 001_users.sql … 008_drop_marketing_consent.sql
+│   ├── load_predictions.py     # loads predictions into the database
+│   ├── verify_setup.py         # checks the setup and access rules
+│   └── create_admin_invite.py  # invites the first administrator
+│
+├── frontend/
+│   ├── app.py              # entry point and page routing
+│   ├── auth.py             # sign-up, sign-in, invites and password reset
+│   ├── predictor.py        # live CLV prediction for a booking
+│   ├── messaging.py        # email and SMS
+│   ├── data/repository.py  # reads and writes Supabase data
+│   ├── views/              # one file per page
+│   └── requirements.txt
 │
 ├── .streamlit/
-│   └── config.toml
+│   ├── config.toml
+│   └── secrets.example.toml
 │
-├── frontend/requirements.txt
-├── pyrefly.toml
 └── README.md
