@@ -5,3 +5,4 @@ plotly
 supabase>=2.31
 fpdf
 python-dotenv
+xgboost==3.4.1

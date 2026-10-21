@@ -1,10 +1,10 @@
 [theme]
 base = "light"
-primaryColor = "#0F3D3E"
-backgroundColor = "#F3F5F2"
-secondaryBackgroundColor = "#EDF5F1"
-textColor = "#0B0B0C"
-borderColor = "#CCD5D1"
+primaryColor = "#0C5D49"
+backgroundColor = "#F4F7F5"
+secondaryBackgroundColor = "#EAF4ED"
+textColor = "#0F1A15"
+borderColor = "#D0DAD4"
 font = "'Times New Roman', Times, serif"
 baseRadius = "8px"
 
@@ -13,3 +13,7 @@ toolbarMode = "minimal"
 
 [server]
 port = 8502
+
+[browser]
+# Streamlit's usage statistics (webhooks.fivetran.com): off for privacy and a clean console.
+gatherUsageStats = false

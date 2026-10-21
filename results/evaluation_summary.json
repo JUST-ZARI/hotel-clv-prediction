@@ -1,0 +1,121 @@
+{
+  "evaluated_at": "2026-10-07T15:25:56+00:00",
+  "winner": "XGBoost",
+  "points": {
+    "Random Forest": 0,
+    "XGBoost": 3
+  },
+  "test_metrics": {
+    "Random Forest": {
+      "MAE": 17055.0474,
+      "RMSE": 35691.6404,
+      "R2": 0.7328
+    },
+    "XGBoost": {
+      "MAE": 15497.0388,
+      "RMSE": 28084.9851,
+      "R2": 0.8345
+    }
+  },
+  "cv_metrics": {
+    "Random Forest": {
+      "MAE": {
+        "mean": 17329.6395,
+        "std": 283.8415
+      },
+      "RMSE": {
+        "mean": 35429.5587,
+        "std": 4013.276
+      },
+      "R2": {
+        "mean": 0.7619,
+        "std": 0.051
+      }
+    },
+    "XGBoost": {
+      "MAE": {
+        "mean": 15900.7103,
+        "std": 126.404
+      },
+      "RMSE": {
+        "mean": 29669.6085,
+        "std": 1210.1367
+      },
+      "R2": {
+        "mean": 0.8303,
+        "std": 0.0399
+      }
+    }
+  },
+  "test_tier_accuracy": 0.6544,
+  "test_high_tier_recall": 0.7944,
+  "predicted_tier_thresholds_ksh": {
+    "high_min": 49261.54296875,
+    "low_max": 14075.8203125,
+    "platinum_min": 116202.8046875,
+    "quantiles": {
+      "high": 0.75,
+      "low": 0.25,
+      "platinum": 0.95
+    },
+    "measured_on": "predicted CLV of training guests"
+  },
+  "as_of_date": "2019-01-11",
+  "at_risk_days": 60,
+  "guests_predicted": 121454,
+  "tier_counts": {
+    "Medium": 60909,
+    "Low": 30055,
+    "High": 24493,
+    "Platinum": 5997
+  },
+  "at_risk_guests": 29597,
+  "action_counts": {
+    "Re-engagement email": 57808,
+    "Win-back discount": 26655,
+    "Send VIP win-back offer": 23166,
+    "Personal call from manager": 5860,
+    "Cost-efficient engagement": 3400,
+    "Targeted upsell offer": 3101,
+    "Email loyalty bonus": 527,
+    "VIP concierge outreach": 487,
+    "Send loyalty offer": 375,
+    "Priority retention campaign": 44,
+    "Upsell suite package": 31
+  },
+  "feature_labels": {
+    "lead_time": "Booking lead time",
+    "arrival_year": "Arrival year",
+    "arrival_month": "Arrival month",
+    "stays_weekend_nights": "Weekend nights",
+    "stays_week_nights": "Week nights",
+    "total_nights": "Length of stay",
+    "num_adults": "Adults",
+    "num_children": "Children",
+    "num_babies": "Babies",
+    "total_guests": "Party size",
+    "adr_ksh": "Average daily rate",
+    "is_repeated_guest": "Repeat guest",
+    "previous_cancellations": "Previous cancellations",
+    "previous_bookings_not_canceled": "Previous stays",
+    "hist_cancellation_rate": "Cancellation rate",
+    "has_previous_bookings": "Has stayed before",
+    "booking_changes": "Booking changes",
+    "required_car_parking_spaces": "Parking requested",
+    "total_special_requests": "Special requests",
+    "has_agent": "Booked through an agent",
+    "has_company": "Company booking",
+    "booking_channel_enc": "Booking channel",
+    "room_type_reserved_enc": "Room type",
+    "deposit_type_enc": "Deposit type",
+    "market_segment_enc": "Market segment",
+    "meal_plan_enc": "Meal plan",
+    "customer_type_enc": "Guest type",
+    "hotel_type_enc": "Hotel type"
+  },
+  "versions": {
+    "scikit-learn": "1.6.1",
+    "xgboost": "3.4.1",
+    "pandas": "2.2.3"
+  }
+}

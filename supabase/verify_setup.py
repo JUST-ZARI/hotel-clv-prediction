@@ -1,5 +1,5 @@
 """
-Verify the Supabase setup after running 001_users.sql and 002_app_tables.sql.
+Verify the Supabase setup after running 001–004 and supabase/load_predictions.py.
 
     frontend/.venv/Scripts/python.exe supabase/verify_setup.py      (from the repo root)
 
@@ -86,7 +86,7 @@ def main() -> int:
     email = f"verify-{secrets.token_hex(4)}@example.invalid"
     password = "Tmp#" + secrets.token_urlsafe(12)
     guest_id = f"VERIFY-{secrets.token_hex(3)}"
-    uid = rm_uid = None
+    uid = rm_uid = adm_uid = None
     original_threshold = None
     try:
         uid = admin.auth.admin.create_user({"email": email, "password": password, "email_confirm": True}).user.id
@@ -167,15 +167,134 @@ def main() -> int:
             check("threshold limited to 30/60/90/120", ok, how)
             ok, how = denied(lambda: rm.table("action_logs").update({"outcome": "Waiting"}).eq("log_id", lid).execute())
             check("revenue manager cannot edit outcomes", ok, how)
+
+            # ---- 006: Revenue Manager decisions + settings history ----------
+            try:
+                admin.table("rm_decisions").select("decision_id").limit(1).execute()
+                has_006 = True
+            except APIError:
+                has_006 = False
+                print("SKIP  decision checks — run supabase/006_rm_decisions.sql first")
+            if has_006:
+                res = rows(rm.table("rm_decisions").insert({
+                    "guest_id": guest_id, "user_id": rm_uid, "decision_type": "Override action",
+                    "original_action": "Win-back discount", "new_action": "Personal call from manager",
+                    "reason": "Setup check decision"}).execute())
+                check("revenue manager can record a decision", bool(res))
+                ok, how = denied(lambda: user.table("rm_decisions").insert({
+                    "guest_id": guest_id, "user_id": uid, "decision_type": "Flag priority",
+                    "reason": "Marketing should not"}).execute())
+                check("marketing cannot record decisions", ok, how)
+                ok, how = denied(lambda: rm.table("rm_decisions").insert({
+                    "guest_id": guest_id, "user_id": rm_uid, "decision_type": "Flag priority",
+                    "reason": "no"}).execute())
+                check("a decision needs a reason of 5+ characters", ok, how)
+                check("everyone can read decisions",
+                      bool(rows(user.table("rm_decisions").select("decision_id").eq("guest_id", guest_id).execute())))
+                hist = rows(user.table("settings_history").select("new_value, changed_by").eq("key", "at_risk_days")
+                            .eq("changed_by", rm_uid).execute())
+                check("threshold changes are kept in settings_history", any(h["new_value"] == 90 for h in hist))
+                ok, how = denied(lambda: user.table("settings_history").insert({
+                    "key": "at_risk_days", "new_value": 30}).execute())
+                check("users cannot write settings_history", ok, how)
             auth._revoke(rm)
+
+        # ---- 004: model runs, prediction columns, staff names ---------------
+        has_004 = True
+        try:
+            admin.table("model_runs").select("predicted_at").limit(1).execute()
+        except APIError:
+            has_004 = False
+            print("SKIP  model/dashboard checks — run supabase/004_predictions_dashboard.sql first")
+        if has_004:
+            new_cols = {"guests": "market_segment, hotel_type, room_type, meal_plan, booking_canceled, "
+                                  "first_booking_year",
+                        "clv_predictions": "tier_badge, clv_percentile, top_drivers, in_action_queue"}
+            for table, cols in new_cols.items():
+                try:
+                    user.table(table).select(cols).limit(1).execute()
+                    check(f"can read the 004 columns on {table}", True)
+                except APIError as e:
+                    check(f"can read the 004 columns on {table}", False, e.message or "")
+            for view in ("model_runs", "staff_directory"):
+                ok, how = denied(lambda view=view: anon.table(view).select("*").limit(1).execute())
+                check(f"anon cannot read {view}", ok, how)
+            check("signed-in users can read staff names",
+                  bool(rows(user.table("staff_directory").select("full_name, role").eq("id", uid).execute())))
+            ok, how = denied(lambda: user.table("staff_directory").select("email").limit(1).execute())
+            check("staff directory does not expose emails", ok, how)
+            ok, how = denied(lambda: user.table("model_runs").insert({
+                "predicted_at": datetime.now(timezone.utc).isoformat(), "model_used": "x", "as_of_date": "2019-01-01",
+                "high_min_clv": 1, "low_max_clv": 0, "platinum_min_clv": 2}).execute())
+            check("cannot write model_runs", ok, how)
+            runs = rows(user.table("model_runs").select("predicted_at, guests_predicted")
+                        .order("predicted_at", desc=True).limit(1).execute())
+            if runs:
+                stored = user.table("clv_predictions").select("guest_id", count=CountMethod.exact).limit(0) \
+                    .eq("predicted_at", runs[0]["predicted_at"]).execute().count
+                check("latest run is fully loaded", stored == runs[0]["guests_predicted"],
+                      f"{stored:,} of {runs[0]['guests_predicted']:,} predictions")
+            else:
+                print("SKIP  no predictions loaded yet — run supabase/load_predictions.py")
+
+        # ---- 007: System Administrator, invites, least privilege ----------
+        has_007 = True
+        try:
+            admin.table("invites").select("invite_id").limit(1).execute()
+        except APIError:
+            has_007 = False
+            print("SKIP  administrator checks — run supabase/007_admin_invites.sql first")
+        if has_007:
+            adm_email = f"verify-adm-{secrets.token_hex(4)}@example.invalid"
+            adm_uid = admin.auth.admin.create_user({"email": adm_email, "password": password,
+                                                    "email_confirm": True}).user.id
+            admin.table("users").insert({"id": adm_uid, "email": adm_email, "full_name": "Setup Check Admin",
+                                         "role": "admin"}).execute()
+            _, adm = auth.sign_in(adm_email, password)
+            check("admin can list all staff accounts",
+                  len(rows(adm.table("users").select("id").execute())) >= 2)
+            ok, how = denied(lambda: adm.table("guests").select("guest_id").limit(1).execute())
+            check("admin cannot read guest data (least privilege)", ok, how)
+            ok, how = denied(lambda: adm.table("clv_predictions").select("prediction_id").limit(1).execute())
+            check("admin cannot read predictions", ok, how)
+            inv = rows(adm.table("invites").insert({"email": f"new-{secrets.token_hex(3)}@example.invalid",
+                                                    "role": "marketing", "code_hash": "x" * 64,
+                                                    "invited_by": adm_uid}).execute())
+            check("admin can create an invite", bool(inv))
+            ok, how = denied(lambda: user.table("invites").insert({"email": "x@example.invalid", "role": "admin",
+                                                                   "code_hash": "y" * 64, "invited_by": uid}).execute())
+            check("staff cannot create invites", ok, how)
+            ok, how = denied(lambda: user.table("invites").select("invite_id").limit(1).execute())
+            check("staff cannot read invites", ok, how)
+            ok, how = denied(lambda: user.table("users").update({"role": "admin"}).eq("id", uid).execute())
+            check("staff cannot change roles", ok, how)
+            res = rows(adm.table("users").update({"is_active": False}).eq("id", uid).execute())
+            check("admin can deactivate an account", bool(res) and res[0]["is_active"] is False)
+            ok, how = denied(lambda: user.table("guests").select("guest_id").eq("guest_id", guest_id).execute())
+            check("a deactivated account loses data access", ok, how)
+            try:
+                auth.sign_in(email, password)
+                check("a deactivated account cannot sign in", False)
+            except auth.AuthFailure:
+                check("a deactivated account cannot sign in", True)
+            ok, how = denied(lambda: anon.table("password_resets").select("reset_id").limit(1).execute())
+            check("reset codes are not readable from the app keys", ok, how)
+            if inv:
+                admin.table("invites").delete().eq("invite_id", inv[0]["invite_id"]).execute()
+            auth._revoke(adm)
 
         auth._revoke(user)
     finally:
         if original_threshold is not None:
             admin.table("app_settings").update({"value": original_threshold}).eq("key", "at_risk_days").execute()
+        if rm_uid:   # the test's threshold changes are not real history
+            try:
+                admin.table("settings_history").delete().eq("changed_by", rm_uid).execute()
+            except APIError:
+                pass
         # guests → cascades clv_predictions + action_logs; auth user → cascades users row
         admin.table("guests").delete().like("guest_id", f"{guest_id}%").execute()
-        for u in (uid, rm_uid):
+        for u in (uid, rm_uid, adm_uid):
             if u:
                 admin.auth.admin.delete_user(u)
         print("cleanup: temporary users, guest, prediction and logs removed; threshold restored")

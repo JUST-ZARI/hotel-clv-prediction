@@ -73,6 +73,10 @@ Model performance is evaluated using:
 
 The models generate guest-level CLV predictions that are subsequently used by the dashboard.
 
+Each record is one guest with a unique `guest_id`. The target is an **Estimated CLV** (historical booking value +
+repeat-booking indicators), standardised to Kenyan Shillings. See [docs/data_pipeline.md](docs/data_pipeline.md)
+for the notebook steps, category translations, Guest ID and CLV definition.
+
 ## Project Structure
 
 ```text

@@ -6,17 +6,36 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # Palette — matches the design tokens in style.py
-INK_900, INK_500, INK_400 = "#0B0B0C", "#333336", "#6B6B70"
-LINE, TRACK = "#E3E8E5", "#EDF1EE"
-BRAND = "#0F3D3E"      # deep teal: primary series
-SAGE = "#8BCF65"       # secondary series
-SKY = "#6FA8DC"        # third series
-NAVY = "#14213D"       # emphasis
+INK_900, INK_500, INK_400 = "#0F1A15", "#5E6A64", "#96A09B"
+LINE, TRACK = "#E3E9E5", "#EEF3F0"
+BRAND = "#0C5D49"      # hotel green: brand
+ORANGE = "#C2540A"     # High tier
+SAGE = "#7DBE5A"       # Medium tier
+SKY = "#6FA8DC"        # Low tier
+PLAT = "#003F2B"       # Platinum (deep forest)
 # Categorical series (e.g. one colour per prediction driver), in display order
-SERIES = [BRAND, SAGE, SKY, "#D9A441", "#C77B5B"]   # teal, sage, soft blue, ochre, terracotta
-TIER_COLORS = {"High": BRAND, "Medium": SAGE, "Low": SKY, "Platinum": NAVY}
-RISK_COLORS = {"High Risk": "#B5483B", "Medium Risk": "#D9A441", "Low Risk": SAGE}
+SERIES = [ORANGE, BRAND, SKY, SAGE, "#F2A15C"]   # orange, green, soft blue, sage, apricot
+TIER_COLORS = {"High": ORANGE, "Medium": SAGE, "Low": SKY, "Platinum": PLAT}
+RISK_COLORS = {"High Risk": "#C0262D", "Medium Risk": "#F2A15C", "Low Risk": SAGE}
 FONT = "'Times New Roman', Times, serif"
+
+
+def warm_scale(n: int) -> list[str]:
+    """n colours from the tier palette: orange through green to sky blue (ranked bars, highest first)."""
+    stops = [(0xC2, 0x54, 0x0A), (0xF2, 0xA1, 0x5C), (0x7D, 0xBE, 0x5A), (0x6F, 0xA8, 0xDC)]
+    out = []
+    for i in range(n):
+        t = i / max(1, n - 1) * (len(stops) - 1)
+        k = min(int(t), len(stops) - 2)
+        f = t - k
+        a, b = stops[k], stops[k + 1]
+        out.append("#%02X%02X%02X" % tuple(round(a[j] + (b[j] - a[j]) * f) for j in range(3)))
+    return out
+
+
+def _tint(hex_color: str, alpha: float = 0.08) -> str:
+    h = hex_color.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})"
 
 
 def _base(fig: go.Figure, height: int, margin: dict | None = None) -> go.Figure:
@@ -25,10 +44,11 @@ def _base(fig: go.Figure, height: int, margin: dict | None = None) -> go.Figure:
         margin=margin or dict(l=0, r=0, t=8, b=0),
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family=FONT, size=13, color=INK_500),
+        font=dict(family=FONT, size=14, color=INK_500),
         showlegend=False,
-        hoverlabel=dict(bgcolor="#FFFFFF", bordercolor=LINE, font=dict(family=FONT, color=INK_900, size=13)),
+        hoverlabel=dict(bgcolor="#FFFFFF", bordercolor=LINE, font=dict(family=FONT, color=INK_900, size=14)),
         bargap=0.35,
+        transition=dict(duration=500, easing="cubic-in-out"),
     )
     fig.update_xaxes(automargin=True)
     fig.update_yaxes(automargin=True)
@@ -54,20 +74,20 @@ def hbar_track(labels: list[str], values: list[float], colors: list[str], value_
     top = max_value or (max(values) if values else 1)
     y = list(range(len(labels)))[::-1]
     fig = go.Figure()
-    fig.add_bar(y=y, x=[top] * len(values), orientation="h", marker=dict(color=TRACK, cornerradius=4),
+    fig.add_bar(y=y, x=[top] * len(values), orientation="h", marker=dict(color=TRACK, cornerradius=6),
                 hoverinfo="skip", width=0.52)
-    fig.add_bar(y=y, x=values, orientation="h", marker=dict(color=colors, cornerradius=4), width=0.52,
+    fig.add_bar(y=y, x=values, orientation="h", marker=dict(color=colors, cornerradius=6), width=0.52,
                 customdata=list(zip(labels, value_text)),
                 hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}<extra></extra>")
     fig.update_layout(barmode="overlay")
     tick = dict(tickmode="array", tickvals=y, showgrid=False, zeroline=False, fixedrange=True,
                 ticks="", ticklabelstandoff=10, range=[-0.6, len(y) - 0.4], automargin=True)
-    fig.update_yaxes(ticktext=labels, tickfont=dict(size=13, color=INK_500), **tick)
+    fig.update_yaxes(ticktext=labels, tickfont=dict(size=14, color=INK_500), **tick)
     fig.update_xaxes(visible=False, range=[0, top], fixedrange=True)
     # Right-hand value labels via a mirrored axis.
     fig.add_scatter(y=y, x=[None] * len(y), yaxis="y2", showlegend=False, hoverinfo="skip")
     fig.update_layout(yaxis2=dict(overlaying="y", side="right", ticktext=value_text,
-                                  tickfont=dict(size=13, color=INK_900), **tick))
+                                  tickfont=dict(size=14, color=INK_900), **tick))
     return _base(fig, height or 34 * len(labels) + 10)
 
 
@@ -77,7 +97,7 @@ def vbar_tiers(tiers: list[str], values: list[float], dim: set[str]) -> go.Figur
         marker=dict(color=[TIER_COLORS[t] for t in tiers],
                     opacity=[0.25 if t in dim else 1 for t in tiers], cornerradius=6),
         text=[f"KSh {v:,.0f}" for v in values], textposition="outside", cliponaxis=False,
-        textfont=dict(color=INK_900, size=14, family=FONT),
+        textfont=dict(color=INK_900, size=15, family=FONT),
         hovertemplate="%{x}: KSh %{y:,.0f}<extra></extra>",
     ))
     fig.update_yaxes(visible=False, fixedrange=True, range=[0, max(values or [1]) * 1.18])
@@ -105,6 +125,7 @@ def tier_lines(timeline, dim: set[str]) -> go.Figure:
         fig.add_scatter(
             x=timeline.index, y=timeline[tier], name=tier, mode="lines+markers",
             line=dict(color=color, width=2.5, shape="spline", smoothing=0.6),
+            fill="tozeroy", fillcolor=_tint(color),
             marker=dict(size=7, color=color, line=dict(color="#FFFFFF", width=1.5)),
             opacity=0.25 if tier in dim else 1,
             hovertemplate=f"{tier} · %{{x}}: %{{y:,}} guests<extra></extra>",

@@ -1,0 +1,29 @@
+feature,label,builtin_importance,permutation_mae_increase_ksh,permutation_share_pct
+total_nights,Length of stay,0.054452635,18756.31760694376,32.1
+adr_ksh,Average daily rate,0.012107531,10494.427458666865,17.96
+previous_bookings_not_canceled,Previous stays,0.7075385,9283.745620168931,15.89
+lead_time,Booking lead time,0.002854086,3827.1910796897623,6.55
+total_special_requests,Special requests,0.013074503,2898.431399545374,4.96
+market_segment_enc,Market segment,0.015535643,2083.0317236908872,3.56
+is_repeated_guest,Repeat guest,0.043198183,1794.8843706597531,3.07
+arrival_year,Arrival year,0.0034868226,1477.0781501325241,2.53
+stays_week_nights,Week nights,0.014001553,1293.1438339120177,2.21
+arrival_month,Arrival month,0.0022890107,1049.9407289450253,1.8
+required_car_parking_spaces,Parking requested,0.022297239,910.8036151901244,1.56
+customer_type_enc,Guest type,0.006056997,621.0397060410498,1.06
+hotel_type_enc,Hotel type,0.009072775,545.3341451134111,0.93
+stays_weekend_nights,Weekend nights,0.005642763,521.3143850479086,0.89
+room_type_reserved_enc,Room type,0.003129793,505.92940154394165,0.87
+booking_changes,Booking changes,0.0066611962,400.1378093572839,0.68
+meal_plan_enc,Meal plan,0.003137905,372.1118836432841,0.64
+hist_cancellation_rate,Cancellation rate,0.016384935,340.5965418401614,0.58
+total_guests,Party size,0.0033374317,256.5783406679158,0.44
+deposit_type_enc,Deposit type,0.0100490805,239.3460760351947,0.41
+num_adults,Adults,0.0025321592,190.9952896367842,0.33
+previous_cancellations,Previous cancellations,0.027674818,173.65478911649734,0.3
+num_children,Children,0.0026369323,164.50036692649883,0.28
+booking_channel_enc,Booking channel,0.0033060415,118.02893091213264,0.2
+has_agent,Booked through an agent,0.002621343,75.1131397140507,0.13
+has_company,Company booking,0.0023724088,39.54341213956832,0.07
+has_previous_bookings,Has stayed before,0.0,0.0,0.0
+num_babies,Babies,0.0045476765,-5.999327775878555,0.0

@@ -1,0 +1,106 @@
+{
+  "trained_at": "2026-10-07T12:37:53+00:00",
+  "train_rows": 97163,
+  "features": [
+    "lead_time",
+    "arrival_year",
+    "arrival_month",
+    "stays_weekend_nights",
+    "stays_week_nights",
+    "total_nights",
+    "num_adults",
+    "num_children",
+    "num_babies",
+    "total_guests",
+    "adr_ksh",
+    "is_repeated_guest",
+    "previous_cancellations",
+    "previous_bookings_not_canceled",
+    "hist_cancellation_rate",
+    "has_previous_bookings",
+    "booking_changes",
+    "required_car_parking_spaces",
+    "total_special_requests",
+    "has_agent",
+    "has_company",
+    "booking_channel_enc",
+    "room_type_reserved_enc",
+    "deposit_type_enc",
+    "market_segment_enc",
+    "meal_plan_enc",
+    "customer_type_enc",
+    "hotel_type_enc"
+  ],
+  "target": "total_clv (Estimated CLV, KSh)",
+  "log_target": false,
+  "cross_validation": {
+    "folds": 5,
+    "shuffle": true,
+    "random_state": 42,
+    "scoring": "neg_mean_absolute_error"
+  },
+  "models": {
+    "random_forest": {
+      "file": "models/random_forest.pkl",
+      "grid": {
+        "n_estimators": [
+          100,
+          200
+        ],
+        "max_depth": [
+          12,
+          16
+        ],
+        "min_samples_leaf": [
+          5,
+          10
+        ]
+      },
+      "chosen_settings": {
+        "max_depth": 16,
+        "min_samples_leaf": 5,
+        "n_estimators": 200
+      },
+      "cv_for_choosing": {
+        "mean_absolute_error_ksh": 17329.64,
+        "std_ksh": 253.88
+      },
+      "training_minutes": 22.0
+    },
+    "xgboost": {
+      "file": "models/xgboost.pkl",
+      "grid": {
+        "learning_rate": [
+          0.05,
+          0.1
+        ],
+        "n_estimators": [
+          300,
+          600
+        ],
+        "max_depth": [
+          4,
+          6,
+          8
+        ]
+      },
+      "chosen_settings": {
+        "learning_rate": 0.1,
+        "max_depth": 8,
+        "n_estimators": 600
+      },
+      "cv_for_choosing": {
+        "mean_absolute_error_ksh": 15900.71,
+        "std_ksh": 113.06
+      },
+      "training_minutes": 2.4
+    }
+  },
+  "versions": {
+    "python": "3.13.16",
+    "scikit-learn": "1.6.1",
+    "xgboost": "3.4.1",
+    "pandas": "2.2.3",
+    "numpy": "2.1.3"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "created_at": "2026-10-06T17:27:44+00:00",
+  "input": "data/processed/cleaned_dataset.csv",
+  "target": "total_clv",
+  "target_currency": "KSh",
+  "features": [
+    "lead_time",
+    "arrival_year",
+    "arrival_month",
+    "stays_weekend_nights",
+    "stays_week_nights",
+    "total_nights",
+    "num_adults",
+    "num_children",
+    "num_babies",
+    "total_guests",
+    "adr_ksh",
+    "is_repeated_guest",
+    "previous_cancellations",
+    "previous_bookings_not_canceled",
+    "hist_cancellation_rate",
+    "has_previous_bookings",
+    "booking_changes",
+    "required_car_parking_spaces",
+    "total_special_requests",
+    "has_agent",
+    "has_company",
+    "booking_channel_enc",
+    "room_type_reserved_enc",
+    "deposit_type_enc",
+    "market_segment_enc",
+    "meal_plan_enc",
+    "customer_type_enc",
+    "hotel_type_enc"
+  ],
+  "tiers": {
+    "high_threshold_ksh": 56100.0,
+    "high_quantile": 0.75,
+    "low_threshold_ksh": 0.0,
+    "low_quantile": 0.25,
+    "rule": "High if total_clv >= high_threshold; Low if total_clv <= low_threshold; otherwise Medium"
+  },
+  "split": {
+    "test_size": 0.2,
+    "random_state": 42,
+    "stratify": "clv_tier",
+    "train_rows": 97163,
+    "test_rows": 24291
+  },
+  "tier_shares": {
+    "all": {
+      "High": 0.251,
+      "Medium": 0.456,
+      "Low": 0.293
+    },
+    "train": {
+      "High": 0.251,
+      "Medium": 0.456,
+      "Low": 0.293
+    },
+    "test": {
+      "High": 0.251,
+      "Medium": 0.456,
+      "Low": 0.293
+    }
+  }
+}

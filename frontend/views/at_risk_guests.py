@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 
 import charts
@@ -21,7 +22,11 @@ all_at_risk = repo.at_risk()
 
 def _save_threshold(key: str) -> None:
     """Revenue Manager changed the shared at-risk threshold."""
-    repo.set_at_risk_days(st.session_state[key])
+    try:
+        repo.set_at_risk_days(st.session_state[key])
+    except PermissionError as e:
+        st.toast(str(e), icon=":material/error:")
+        return
     st.toast(f"At-risk threshold set to {st.session_state[key]} days for all users.", icon=":material/check_circle:")
 
 # ---------------------------------------------------------------------------
@@ -52,10 +57,18 @@ with st.container(key="ar_banner", horizontal=True, vertical_alignment="center",
         with st.container(key="ar_export_all", width="content"):
             ui.download_csv("Export All", all_at_risk[EXPORT_COLS], "at_risk_guests_all.csv", key="ar_all_csv")
 
+changes = repo.settings_history("at_risk_days")
+if not changes.empty:
+    with st.expander(f"Threshold change history ({len(changes)})", icon=":material/history:"):
+        st.html("".join(
+            f'<div class="ar-hist"><b>{ui.esc(r.old_value)} → {ui.esc(r.new_value)} days</b>'
+            f'<span>{ui.esc(r.changed_by_name or "Revenue Manager")} · {r.changed_at:%d %b %Y, %H:%M}</span></div>'
+            for r in changes.itertuples()))
+
 # ---------------------------------------------------------------------------
 # Filters
 # ---------------------------------------------------------------------------
-MIN_CLV = [150_000, 200_000, 300_000, 400_000]
+MIN_CLV = repo.min_clv_options()
 MIN_DAYS = [threshold] + [d for d in (60, 90, 120, 180) if d > threshold]
 TIER_SCOPE = {"High / Platinum": None, "Platinum only": "Platinum", "High only": "High"}
 
@@ -63,7 +76,7 @@ with st.container(key="bar_ar", horizontal=True, vertical_alignment="center"):
     min_clv = ui.filter_select("Min CLV", MIN_CLV, "ar_min_clv", format_func=ui.ksh, width=225)
     min_days = ui.filter_select("Days Inactive", MIN_DAYS, "ar_days", format_func=lambda d: f"{d}+ days", width=235)
     scope = ui.filter_select("CLV Tier", list(TIER_SCOPE), "ar_scope", width=250)
-    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.BOOKING_CHANNELS, "ar_channel", width=290)
+    channel = ui.filter_select("Booking Channel", ["All Channels"] + repo.booking_channels(), "ar_channel", width=290)
     query = ui.search_box("ar_search")
     download_slot = st.container(width="content")
 
@@ -131,8 +144,37 @@ with ui.card("ar_list"):
         ui.Col("Prev. Stays", 0.9, lambda r: str(r["total_previous_stays"])),
         ui.Col("Risk Level", 1.1, lambda r: ui.pill(r["risk_level"], ui.RISK_TONE[r["risk_level"]])),
         ui.Col("Recommended Action", 2.0, lambda r: ui.pill(r["recommended_action"], ui.action_tone(r["recommended_action"]))),
+        ui.Col("Marketing", 1.1, lambda r: ui.pill("Sent", "green") if r.get("is_priority") else
+               '<span class="ds-td" style="color:var(--ink-400)">—</span>'),
     ])
     ui.pagination_bar("ar", len(rows))
+
+# ---------------------------------------------------------------------------
+# What next: hand at-risk guests to the Marketing Team as priority retention cases
+# ---------------------------------------------------------------------------
+if repo.decisions_enabled():
+    with ui.card("ar_send"):
+        ui.card_title("Send to Marketing for retention",
+                      "Chosen guests are flagged as Priority: they appear at the top of the Marketing Team's Action "
+                      "Board with their recommended action, and the outcome is tracked in the guest's action log.",
+                      fa="paper-plane")
+        not_sent = rows[~rows.get("is_priority", pd.Series(False, index=rows.index)).astype(bool)]
+        choices = not_sent["guest_id"].head(200).tolist()
+        with st.form("ar_send_form", border=False, clear_on_submit=True):
+            picked = st.multiselect("Guests to send (from the list above, highest first)", choices,
+                                    default=[g for g in page["guest_id"] if g in choices][:8],
+                                    placeholder="Choose at-risk guests")
+            reason = st.text_input("Reason", value="At-risk high-value guest: retention follow-up needed.")
+            if st.form_submit_button(f"Send to Marketing", type="primary", icon=":material/send:"):
+                try:
+                    sent = repo.record_priority(picked, reason)
+                except ValueError as e:
+                    st.toast(str(e), icon=":material/error:")
+                    sent = 0
+                if sent:
+                    st.toast(f"{sent} guest{'s' if sent != 1 else ''} sent to the Marketing Team as priority.",
+                             icon=":material/check_circle:")
+                    st.rerun()
 
 ui.css("""
 .st-key-ar_banner {
@@ -143,15 +185,18 @@ ui.css("""
 .ar-banner-ico {
     width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
-    background: var(--red-600); color: #FFFFFF; font-size: 1.064rem;
+    background: var(--surface); color: var(--red-600); border: 1px solid var(--red-200); font-size: 0.95rem;
 }
-.ar-rule { font-size: 0.92rem; color: var(--red-700); white-space: nowrap; }
+.ar-rule { font-size: 0.85rem; color: var(--red-700); white-space: nowrap; }
 .ar-rule em { color: var(--ink-500); }
 .st-key-ar_banner [class*="st-key-flt_"] [role="group"] { background: var(--surface) !important; }
-.ar-banner-title { font-size: 1.12rem; font-weight: 700; color: var(--red-700); }
-.ar-banner-text { margin-top: 2px; font-size: 0.952rem; color: var(--red-700); }
+.ar-banner-title { font-size: 1rem; font-weight: 600; color: var(--red-700); }
+.ar-banner-text { margin-top: 2px; font-size: 0.875rem; color: var(--red-700); }
 .st-key-ar_banner_tools { gap: 10px !important; flex-shrink: 0; }
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"] { background: var(--red-600) !important; border-color: var(--red-600) !important; }
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"]:hover { background: var(--red-700) !important; border-color: var(--red-700) !important; }
 .st-key-ar_sortbox { gap: 8px !important; }
+.ar-hist { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 0.85rem;
+           border-bottom: 1px solid var(--line); color: var(--ink-800); }
+.ar-hist span { color: var(--ink-500); }
 """)

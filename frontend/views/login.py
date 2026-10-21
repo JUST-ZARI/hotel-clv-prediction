@@ -93,16 +93,15 @@ with st.container(key="auth_card"):
 
         st.form_submit_button("Login", type="primary", width="stretch", on_click=_submit)
 
+    if st.button("Forgot password?", type="tertiary", key="login_forgot", icon=":material/key:"):
+        form.reset()
+        st.switch_page(auth.RESET_PAGE)
+
     st.markdown('<div class="auth-switch">New to Hotel CLV?</div>', unsafe_allow_html=True)
     if st.button("Create an account", width="stretch", key="login_to_signup"):
         form.reset()
         st.switch_page(auth.SIGNUP_PAGE)
 
-st.markdown(
-    f'<div class="auth-foot">{icon("lock")}'
-    "Authorised hotel staff only</div>",
-    unsafe_allow_html=True,
-)
 
 # Signed in by the form callback → app.py routes to the role's dashboard.
 if auth.is_logged_in():

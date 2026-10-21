@@ -20,7 +20,7 @@ from style import icon
 LOOKUP_PAGE = "views/guest_lookup.py"
 PAGE_SIZE = 8
 
-TIER_TONE = {"Platinum": "navy", "High": "teal", "Medium": "sage", "Low": "sky"}
+TIER_TONE = {"Platinum": "plat", "High": "orange", "Medium": "sage", "Low": "sky"}
 RISK_TONE = {"High Risk": "red", "Medium Risk": "amber", "Low Risk": "green"}
 OUTCOME_TONE = {"Came back": "green", "Didn't come back": "red", "Waiting": "neutral"}
 
@@ -63,7 +63,7 @@ def action_tone(action: str) -> str:
     if "re-engagement" in a or "retention" in a or "bonus" in a:
         return "amber"
     if "vip" in a or "loyalty" in a:
-        return "teal"
+        return "orange"
     return "neutral"
 
 
@@ -75,12 +75,17 @@ def action_text(action: str) -> str:
 # Page header
 # ---------------------------------------------------------------------------
 
+AREA = {"revenue_manager": "Revenue Management", "marketing": "Marketing", "admin": "Administration"}
+
+
 def page_header(title: str, subtitle: str) -> None:
+    area = AREA.get(st.session_state.get("role"), "Decision Support System")
     st.html(f"""
     <header class="ds-page-head">
         <div>
+            <p class="ds-eyebrow">Grand Regency Hotel<i>·</i><b>{esc(area)}</b></p>
             <h1 class="ds-page-title">{esc(title)}</h1>
-            <p class="ds-page-sub">{esc(subtitle)}</p>
+            {f'<p class="ds-page-sub">{esc(subtitle)}</p>' if subtitle else ""}
         </div>
     </header>""")
 
@@ -95,7 +100,7 @@ class Kpi:
     value: str
     caption: str
     icon: str
-    tone: str = "neutral"          # neutral | teal | sage | sky | navy | green | amber | red
+    tone: str = "neutral"          # neutral | brand | orange | plat | sage | sky | navy | green | amber | red
     trend: str | None = None       # optional second caption line
     trend_dir: str = "flat"        # up | down | flat
     dimmed: bool = False
@@ -110,9 +115,12 @@ def kpi_row(items: list[Kpi], filled: bool = False) -> None:
         cls = f"ds-kpi ds-kpi-{k.tone}{' ds-kpi-filled' if filled else ''}{' ds-dim' if k.dimmed else ''}"
         cards.append(f"""
         <div class="{cls}">
-            <div class="ds-kpi-head"><span class="ds-kpi-label">{esc(k.label)}</span>{icon(k.icon)}</div>
-            <div class="ds-kpi-value">{esc(k.value)}</div>
-            <div class="ds-kpi-caption">{esc(k.caption)}</div>{trend}
+            <span class="ds-kpi-ico">{icon(k.icon)}</span>
+            <div class="ds-kpi-body">
+                <div class="ds-kpi-label">{esc(k.label)}</div>
+                <div class="ds-kpi-value">{esc(k.value)}</div>
+                <div class="ds-kpi-caption">{esc(k.caption)}</div>{trend}
+            </div>
         </div>""")
     st.html(f'<div class="ds-kpi-grid" style="--cols:{len(items)}">{"".join(cards)}</div>')
 
@@ -255,7 +263,8 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 def download_csv(label: str, df: pd.DataFrame, filename: str, key: str, primary: bool = True) -> None:
-    st.download_button(label, csv_bytes(df), file_name=filename, mime="text/csv", key=key,
+    # Built only when clicked: lists can hold tens of thousands of guests.
+    st.download_button(label, lambda: csv_bytes(df), file_name=filename, mime="text/csv", key=key,
                        icon=":material/download:", type="primary" if primary else "secondary",
                        on_click="ignore")
 
