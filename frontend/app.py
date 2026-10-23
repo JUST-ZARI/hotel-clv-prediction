@@ -9,7 +9,7 @@ from utils import init_session_state, render_sidebar
 _ua = (st.context.headers.get("User-Agent") or "").lower()
 _mobile = any(k in _ua for k in ("iphone", "android", "mobile", "ipod"))
 st.set_page_config(page_title="Hotel CLV", page_icon=":material/apartment:", layout="wide",
-                   initial_sidebar_state="collapsed" if _mobile else 240)
+                   initial_sidebar_state="collapsed" if _mobile else 200)
 init_session_state()
 inject_global_css()
 if not auth.config_error():
