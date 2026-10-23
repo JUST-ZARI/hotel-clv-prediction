@@ -381,6 +381,17 @@ hr { border-color: var(--line) !important; margin: 1rem 0 !important; }
         var(--side-bg) !important;
     border-right: none !important;
 }
+/* Slim sidebar: Streamlit's smallest setting is 200px, so the open width is narrowed here */
+[data-testid="stSidebar"][aria-expanded="true"] {
+    width: 236px !important; min-width: 236px !important; max-width: 236px !important;
+}
+/* Nothing in the sidebar is cut off: long labels and names wrap onto a second line */
+[data-testid="stSidebar"] [data-testid="stPageLink"] a *,
+[data-testid="stSidebar"] .ds-brand-sub,
+[data-testid="stSidebar"] .ds-user-name {
+    white-space: normal !important; overflow: visible !important; text-overflow: clip !important;
+}
+[data-testid="stSidebar"] .ds-user-name { overflow-wrap: anywhere; }
 [data-testid="stSidebarHeader"] { padding: 14px 12px 4px !important; min-height: 0 !important; height: auto !important; }
 [data-testid="stSidebarContent"] { padding: 0 !important; background: transparent !important; }
 [data-testid="stSidebarUserContent"] { padding: 0 12px 14px !important; }
@@ -421,7 +432,7 @@ hr { border-color: var(--line) !important; margin: 1rem 0 !important; }
 }
 [data-testid="stSidebar"] [data-testid="stPageLink"] a {
     padding: 9px 12px !important; min-height: 42px;
-    border-radius: var(--r-md) !important; margin: 0 !important; gap: 12px;
+    border-radius: var(--r-md) !important; margin: 0 !important; gap: 10px;
     transition: background-color .2s var(--ease), transform .2s var(--ease);
 }
 [data-testid="stSidebar"] [data-testid="stPageLink"] a p,
@@ -437,7 +448,7 @@ hr { border-color: var(--line) !important; margin: 1rem 0 !important; }
 
 /* Count badge on a nav item (content set per render by render_sidebar) */
 [class*="st-key-nav"] a::after {
-    margin-left: auto; padding: 0 8px; border-radius: 99px;
+    margin-left: auto; flex-shrink: 0; padding: 0 7px; border-radius: 99px;
     background: var(--red-600); color: #FFFFFF; font-size: 0.72rem; font-weight: 700; line-height: 1.6;
     font-family: var(--font);
 }
@@ -465,6 +476,16 @@ hr { border-color: var(--line) !important; margin: 1rem 0 !important; }
    DASHBOARD LAYOUT
    ========================================================= */
 .stMain [data-testid="stMainBlockContainer"] { padding: 26px 32px 40px !important; max-width: 1480px; }
+/* Same 90% scale as the home page, so every page has the same density (desktop and tablet) */
+.stMain [data-testid="stMainBlockContainer"], [data-testid="stSidebarContent"] { zoom: .9; }
+/* Plotly works out hover positions without CSS zoom, so charts are scaled back to 100% */
+.stMain [data-testid="stMainBlockContainer"] .stPlotlyChart { zoom: 1.1111; }
+/* Streamlit fixes the chart box to the figure height; let it grow so the scaled-back chart is not cut off */
+.stMain [data-testid="stMainBlockContainer"] [data-testid="stElementContainer"]:has(> div > .stPlotlyChart) {
+    height: auto !important; flex: 0 0 auto !important; overflow: visible !important;
+}
+.stMain [data-testid="stMainBlockContainer"] div:has(> .stPlotlyChart),
+.stMain [data-testid="stMainBlockContainer"] .stPlotlyChart { height: auto !important; }
 .stMain [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] { gap: 20px; }
 
 /* Zero-height helper iframes (chart export) must not take space */
@@ -716,6 +737,8 @@ html { scroll-behavior: smooth; }
     .ds-impact-i { border-left: none; padding: 0 12px 0 0; }
 }
 @media (max-width: 640px) {
+    .stMain [data-testid="stMainBlockContainer"], [data-testid="stSidebarContent"] { zoom: 1; }
+    .stMain [data-testid="stMainBlockContainer"] .stPlotlyChart { zoom: 1; }
     .stMain [data-testid="stMainBlockContainer"] { padding: 16px !important; }
     .stMain [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] { gap: 14px; }
     .ds-page-title { font-size: 1.5rem !important; }
@@ -779,7 +802,7 @@ _PUBLIC_CSS = """
 <style>
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 [data-testid="stExpandSidebarButton"], [data-testid="stHeader"] { display: none !important; }
-[data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: none !important; }
+[data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: none !important; zoom: 1 !important; }
 [data-testid="stMain"] { padding: 0 !important; }
 [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] { gap: 0 !important; }
 </style>

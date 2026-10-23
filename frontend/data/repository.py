@@ -487,6 +487,7 @@ def log_action(guest_id: str, action_taken: str, delivery_channel: str,
         row.update(recipient_masked=recipient_masked, provider_message_id=provider_message_id)
     _client().table("action_logs").insert(row).execute()
     _recent_completed.clear()
+    _completed_actions.clear()
 
 
 def sends_last_24h() -> int:
@@ -512,6 +513,7 @@ def set_outcome(log_id: str, outcome: str) -> None:
     if not _rows(res):
         raise PermissionError("Only the Marketing Team can record outcomes.")
     _recent_completed.clear()
+    _completed_actions.clear()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -544,6 +546,45 @@ def outcome_summary(days: int = 30) -> dict:
         "return_rate": (len(came_back) / contacted) if contacted else 0.0,
         "value_retained": int(clv.reindex(came_back).fillna(0).sum()),
     }
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _completed_actions(_client, days: int) -> pd.DataFrame:
+    """Completed actions of the last `days` days with date, action, channel and outcome."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cols = ["guest_id", "action_taken", "delivery_channel", "outcome", "logged_at"]
+    res = (_client.table("action_logs").select(", ".join(cols)).eq("action_status", "Completed")
+           .gte("logged_at", since).order("logged_at").execute())
+    return pd.DataFrame(_rows(res), columns=cols)
+
+
+def campaign_trends(days: int = 90) -> pd.DataFrame:
+    """One row per completed action in the last `days` days, for the Campaign Insights charts.
+
+    Adds the guest's CLV tier and the week the action was sent (weeks start on Monday).
+    """
+    df = _completed_actions(_client(), days).copy()
+    tiers = guests().set_index("guest_id")["clv_tier"]
+    df["clv_tier"] = df["guest_id"].map(tiers).fillna("Unknown")
+    df["delivery_channel"] = df["delivery_channel"].fillna("Not recorded")
+    df["outcome"] = df["outcome"].fillna("Waiting")
+    when = pd.to_datetime(df["logged_at"], utc=True).dt.tz_convert("Africa/Nairobi")
+    df["week"] = (when.dt.tz_localize(None).dt.normalize()
+                  - pd.to_timedelta(when.dt.weekday, unit="D"))
+    return df
+
+
+def return_rates(df: pd.DataFrame, by: str) -> pd.DataFrame:
+    """Return rate per group: came back ÷ actions whose outcome is known (waiting ones are left out)."""
+    known = df[df["outcome"] != "Waiting"]
+    out = (known.groupby(by)["outcome"]
+           .agg(decided="size", came_back=lambda s: (s == "Came back").sum())
+           .reset_index())
+    waiting = df[df["outcome"] == "Waiting"].groupby(by).size().rename("waiting")
+    out = out.merge(waiting, left_on=by, right_index=True, how="outer").fillna(0)
+    out[["decided", "came_back", "waiting"]] = out[["decided", "came_back", "waiting"]].astype(int)
+    out["return_rate"] = out["came_back"] / out["decided"].where(out["decided"] > 0)
+    return out.sort_values(["return_rate", "decided"], ascending=False, na_position="last")
 
 
 # ---------------------------------------------------------------------------

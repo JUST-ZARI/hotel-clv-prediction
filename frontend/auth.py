@@ -25,6 +25,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import streamlit as st
 
@@ -190,8 +191,20 @@ def normalize_email(email: str) -> str:
 
 
 def app_url() -> str:
-    """Public address of the dashboard, used in invite and confirmation emails."""
-    return str(st.secrets.get("app", {}).get("base_url") or "http://localhost:8502").rstrip("/")
+    """Public address of the dashboard, used in invite and confirmation emails.
+
+    Uses [app] base_url from secrets; if that is missing, the address the app is open on.
+    """
+    configured = st.secrets.get("app", {}).get("base_url")
+    if configured:
+        return str(configured).rstrip("/")
+    try:
+        parts = urlsplit(st.context.url or "")
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+    except Exception:  # noqa: BLE001 - outside a browser session
+        pass
+    return "http://localhost:8501"
 
 
 def _hash(code: str) -> str:
