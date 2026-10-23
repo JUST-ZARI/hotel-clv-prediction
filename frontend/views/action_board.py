@@ -1,3 +1,6 @@
+import textwrap
+
+import pandas as pd
 import streamlit as st
 
 import charts
@@ -119,3 +122,71 @@ with ui.card("actions"):
     ui.data_table("ab", rows.iloc[start:end], cols)
     ui.pagination_bar("ab", len(rows))
 
+
+# ---------------------------------------------------------------------------
+# Campaign insights — trends in ACTION_LOGS outcomes, so the next campaign
+# is planned on what has worked before
+# ---------------------------------------------------------------------------
+PERIODS = {"Last 30 days": 30, "Last 60 days": 60, "Last 90 days": 90, "Last 12 months": 365}
+
+
+def _rate_chart(rates, by: str, colors: list[str], key: str, filename: str) -> None:
+    labels = ["<br>".join(textwrap.wrap(str(v), 18)) for v in rates[by]]
+    values = [0 if pd.isna(r) else round(r * 100, 1) for r in rates["return_rate"]]
+    text = [f"{r:.0%} ({c}/{d})" if d else f"{w} waiting"
+            for r, c, d, w in zip(rates["return_rate"], rates["came_back"], rates["decided"], rates["waiting"])]
+    charts.show(charts.hbar_track(labels=labels, values=values, colors=colors, value_text=text, max_value=100,
+                                  height=44 * len(labels) + 10),
+                key=key, filename=filename)
+
+
+with ui.card("insights"):
+    with st.container(horizontal=True, vertical_alignment="top"):
+        ui.card_title("Campaign Insights",
+                      "How guests responded to past actions, to guide the next campaign", fa="chart-line")
+        st.space("stretch")
+        period = ui.filter_select("Period", list(PERIODS), "ci_period", index=2, width=230)
+    trends = repo.campaign_trends(PERIODS[period])
+
+    if trends.empty:
+        ui.note("No completed actions in this period yet. Charts appear once actions are sent and recorded.")
+    else:
+        decided = int((trends["outcome"] != "Waiting").sum())
+        came = int((trends["outcome"] == "Came back").sum())
+        waiting = len(trends) - decided
+        ui.kpi_row([
+            ui.Kpi("Actions Sent", f"{len(trends):,}", period, "paper-plane", "brand"),
+            ui.Kpi("Return Rate", f"{came / decided:.0%}" if decided else "–",
+                   f"{came} of {decided} with a known result", "rotate-left", "orange"),
+            ui.Kpi("Still Waiting", f"{waiting:,}", "Outcome not recorded yet", "hourglass-half"),
+        ])
+
+        weekly = (trends.pivot_table(index="week", columns="outcome", values="guest_id", aggfunc="size",
+                                     fill_value=0).sort_index())
+        with st.container(horizontal=True, vertical_alignment="top"):
+            ui.card_title("Outcomes per week", "Guests contacted each week and what happened next")
+            st.space("stretch")
+            ui.export_menu("chart_ci_weeks", weekly.reset_index(), "campaign_outcomes_per_week")
+        charts.show(charts.outcome_weeks(weekly), key="chart_ci_weeks", filename="campaign_outcomes_per_week")
+
+        by_action = repo.return_rates(trends, "action_taken")
+        ui.card_title("Return rate by action", "Which actions bring guests back most often")
+        _rate_chart(by_action, "action_taken", charts.warm_scale(len(by_action)),
+                    "chart_ci_action", "return_rate_by_action")
+
+        left, right = st.columns(2, gap="large")
+        with left:
+            by_tier = repo.return_rates(trends, "clv_tier")
+            ui.card_title("By CLV tier", "Response of each guest tier")
+            _rate_chart(by_tier, "clv_tier", [charts.TIER_COLORS.get(t, charts.INK_400) for t in by_tier["clv_tier"]],
+                        "chart_ci_tier", "return_rate_by_tier")
+        with right:
+            by_channel = repo.return_rates(trends, "delivery_channel")
+            ui.card_title("By channel", "Email compared with SMS")
+            _rate_chart(by_channel, "delivery_channel",
+                        [{"Email": charts.BRAND, "SMS": charts.SKY}.get(c, charts.INK_400)
+                         for c in by_channel["delivery_channel"]],
+                        "chart_ci_channel", "return_rate_by_channel")
+
+        ui.note("Return rate counts only actions with a recorded result. A guest coming back shows what happened "
+                "after the action, not proof that the action caused it.")

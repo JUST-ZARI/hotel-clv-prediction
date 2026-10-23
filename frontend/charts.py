@@ -136,3 +136,28 @@ def tier_lines(timeline, dim: set[str]) -> go.Figure:
                      tickformat=",", tickfont=dict(color=INK_400, size=12), rangemode="tozero")
     fig.update_layout(hovermode="x unified")
     return _base(fig, 260, dict(l=0, r=8, t=8, b=0))
+
+
+OUTCOME_COLORS = {"Came back": BRAND, "Didn't come back": "#F2A15C", "Waiting": "#C9D3CE"}
+
+
+def outcome_weeks(weekly) -> go.Figure:
+    """Stacked bars: actions sent each week, split by outcome. `weekly` has a week index and outcome columns."""
+    fig = go.Figure()
+    for outcome, color in OUTCOME_COLORS.items():
+        if outcome not in weekly.columns:
+            continue
+        fig.add_bar(
+            x=weekly.index, y=weekly[outcome], name=outcome,
+            marker=dict(color=color, cornerradius=4),
+            hovertemplate=f"{outcome}: %{{y:,}}<extra></extra>",
+        )
+    fig.update_layout(barmode="stack", hovermode="x unified", showlegend=True,
+                      legend=dict(orientation="h", y=1.12, x=0, traceorder="normal", font=dict(size=13, color=INK_500)))
+    fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%d %b", ticklabelmode="period",
+                     tickfont=dict(color=INK_500, size=13), hoverformat="Week of %d %b %Y")
+    fig.update_yaxes(showgrid=True, gridcolor=LINE, zeroline=False, fixedrange=True, rangemode="tozero",
+                     tickformat=",d", tickfont=dict(color=INK_400, size=12))
+    fig = _base(fig, 270, dict(l=0, r=8, t=36, b=0))
+    fig.update_layout(showlegend=True, bargap=0.45)
+    return fig
