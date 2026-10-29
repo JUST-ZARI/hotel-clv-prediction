@@ -17,7 +17,7 @@ PLAT = "#003F2B"       # Platinum (deep forest)
 SERIES = [ORANGE, BRAND, SKY, SAGE, "#F2A15C"]   # orange, green, soft blue, sage, apricot
 TIER_COLORS = {"High": ORANGE, "Medium": SAGE, "Low": SKY, "Platinum": PLAT}
 RISK_COLORS = {"High Risk": "#C0262D", "Medium Risk": "#F2A15C", "Low Risk": SAGE}
-FONT = "'Times New Roman', Times, serif"
+FONT = "Inter, 'Segoe UI', system-ui, sans-serif"
 
 
 def warm_scale(n: int) -> list[str]:
@@ -44,9 +44,9 @@ def _base(fig: go.Figure, height: int, margin: dict | None = None) -> go.Figure:
         margin=margin or dict(l=0, r=0, t=8, b=0),
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family=FONT, size=14, color=INK_500),
+        font=dict(family=FONT, size=10, color=INK_500),
         showlegend=False,
-        hoverlabel=dict(bgcolor="#FFFFFF", bordercolor=LINE, font=dict(family=FONT, color=INK_900, size=14)),
+        hoverlabel=dict(bgcolor="#FFFFFF", bordercolor=LINE, font=dict(family=FONT, color=INK_900, size=10)),
         bargap=0.35,
         transition=dict(duration=500, easing="cubic-in-out"),
     )
@@ -82,12 +82,12 @@ def hbar_track(labels: list[str], values: list[float], colors: list[str], value_
     fig.update_layout(barmode="overlay")
     tick = dict(tickmode="array", tickvals=y, showgrid=False, zeroline=False, fixedrange=True,
                 ticks="", ticklabelstandoff=10, range=[-0.6, len(y) - 0.4], automargin=True)
-    fig.update_yaxes(ticktext=labels, tickfont=dict(size=14, color=INK_500), **tick)
+    fig.update_yaxes(ticktext=labels, tickfont=dict(size=10, color=INK_500), **tick)
     fig.update_xaxes(visible=False, range=[0, top], fixedrange=True)
     # Right-hand value labels via a mirrored axis.
     fig.add_scatter(y=y, x=[None] * len(y), yaxis="y2", showlegend=False, hoverinfo="skip")
     fig.update_layout(yaxis2=dict(overlaying="y", side="right", ticktext=value_text,
-                                  tickfont=dict(size=14, color=INK_900), **tick))
+                                  tickfont=dict(size=10, color=INK_900), **tick))
     return _base(fig, height or 34 * len(labels) + 10)
 
 
@@ -97,11 +97,11 @@ def vbar_tiers(tiers: list[str], values: list[float], dim: set[str]) -> go.Figur
         marker=dict(color=[TIER_COLORS[t] for t in tiers],
                     opacity=[0.25 if t in dim else 1 for t in tiers], cornerradius=6),
         text=[f"KSh {v:,.0f}" for v in values], textposition="outside", cliponaxis=False,
-        textfont=dict(color=INK_900, size=15, family=FONT),
+        textfont=dict(color=INK_900, size=11, family=FONT),
         hovertemplate="%{x}: KSh %{y:,.0f}<extra></extra>",
     ))
     fig.update_yaxes(visible=False, fixedrange=True, range=[0, max(values or [1]) * 1.18])
-    fig.update_xaxes(showgrid=False, fixedrange=True, tickfont=dict(color=INK_500, size=14))
+    fig.update_xaxes(showgrid=False, fixedrange=True, tickfont=dict(color=INK_500, size=10))
     return _base(fig, 250, dict(l=0, r=0, t=24, b=0))
 
 
@@ -114,7 +114,7 @@ def donut(tiers: list[str], counts: list[int], total: int, dim: set[str]) -> go.
         hovertemplate="%{label}: %{value:,} (%{percent})<extra></extra>",
     ))
     fig.add_annotation(text=f"<b>{total:,}</b><br><span style='font-size:13px;color:{INK_500}'>Total Guests</span>",
-                       showarrow=False, font=dict(size=24, color=INK_900, family=FONT))
+                       showarrow=False, font=dict(size=17, color=INK_900, family=FONT))
     return _base(fig, 190, dict(l=0, r=0, t=0, b=0))
 
 
@@ -131,9 +131,9 @@ def tier_lines(timeline, dim: set[str]) -> go.Figure:
             hovertemplate=f"{tier} · %{{x}}: %{{y:,}} guests<extra></extra>",
         )
     fig.update_xaxes(showgrid=False, fixedrange=True, tickmode="linear", dtick=1,
-                     showline=False, tickfont=dict(color=INK_500, size=13))
+                     showline=False, tickfont=dict(color=INK_500, size=10))
     fig.update_yaxes(showgrid=True, gridcolor=LINE, zeroline=False, fixedrange=True,
-                     tickformat=",", tickfont=dict(color=INK_400, size=12), rangemode="tozero")
+                     tickformat=",", tickfont=dict(color=INK_400, size=10), rangemode="tozero")
     fig.update_layout(hovermode="x unified")
     return _base(fig, 260, dict(l=0, r=8, t=8, b=0))
 
@@ -153,11 +153,11 @@ def outcome_weeks(weekly) -> go.Figure:
             hovertemplate=f"{outcome}: %{{y:,}}<extra></extra>",
         )
     fig.update_layout(barmode="stack", hovermode="x unified", showlegend=True,
-                      legend=dict(orientation="h", y=1.12, x=0, traceorder="normal", font=dict(size=13, color=INK_500)))
+                      legend=dict(orientation="h", y=1.12, x=0, traceorder="normal", font=dict(size=10, color=INK_500)))
     fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%d %b", ticklabelmode="period",
-                     tickfont=dict(color=INK_500, size=13), hoverformat="Week of %d %b %Y")
+                     tickfont=dict(color=INK_500, size=10), hoverformat="Week of %d %b %Y")
     fig.update_yaxes(showgrid=True, gridcolor=LINE, zeroline=False, fixedrange=True, rangemode="tozero",
-                     tickformat=",d", tickfont=dict(color=INK_400, size=12))
+                     tickformat=",d", tickfont=dict(color=INK_400, size=10))
     fig = _base(fig, 270, dict(l=0, r=8, t=36, b=0))
     fig.update_layout(showlegend=True, bargap=0.45)
     return fig
