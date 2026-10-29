@@ -3,6 +3,7 @@ import textwrap
 import pandas as pd
 import streamlit as st
 
+import alerts
 import charts
 import components as ui
 from auth import require_auth
@@ -13,6 +14,9 @@ rm = ui.is_revenue_manager()
 
 ui.page_header("Hotel Guest CLV Dashboard",
                "Overview of predicted customer lifetime value and recommended guest actions")
+
+if not rm:
+    alerts.action_board_banner(alerts.inbox())
 
 # ---------------------------------------------------------------------------
 # Impact of recent actions (from ACTION_LOGS outcomes)
@@ -112,15 +116,17 @@ with ui.card("actions"):
                + (" " + ui.pill("Priority", "navy") if r.get("is_priority") else "")),
     ]
     if rm:
-        cols.append(ui.Col("Predicted CLV (KSh)", 1.6, lambda r: f'<span class="ds-strong">{r["predicted_clv"]:,}</span>'))
+        cols.append(ui.Col("Predicted CLV (KSh)", 1.6, lambda r: f'<span class="gt-num">{r["predicted_clv"]:,}</span>'))
     else:
-        cols.append(ui.Col("Recommended Action", 2.0, lambda r: ui.action_text(r["recommended_action"])))
+        cols.append(ui.Col("Recommended Action", 2.0, lambda r: f'<span class="gt-tag gt-tag-action">{ui.esc(r["recommended_action"])}</span>'))
     cols += [
         ui.Col("Days Since Last Stay", 1.4, lambda r: f'{r["days_since_last_stay"]} days'),
         ui.Col("", 1.0, kind="view_button"),
     ]
     ui.data_table("ab", rows.iloc[start:end], cols)
     ui.pagination_bar("ab", len(rows))
+
+alerts.scroll_to_list()
 
 
 # ---------------------------------------------------------------------------

@@ -354,12 +354,17 @@ LOG_COLS = [("Action Taken", 2.2), ("Channel", 1.2), ("Status", 1.0), ("Time Sta
 
 
 def _save_outcome(log_id: str, key: str) -> None:
+    outcome = st.session_state[key]
+    was_priority = bool(g.get("is_priority"))
     try:
-        repo.set_outcome(log_id, st.session_state[key])
+        repo.set_outcome(log_id, outcome)
     except (PermissionError, APIError):
         st.toast("The outcome could not be saved.", icon=":material/error:")
         return
-    st.toast(f"Outcome updated: {st.session_state[key]}.", icon=":material/check_circle:")
+    st.toast(f"Outcome updated: {outcome}.", icon=":material/check_circle:")
+    if outcome == "Came back" and was_priority and repo.guest_decision(gid)["priority"] is None:
+        st.toast("The guest came back, so their Priority flag was removed automatically.",
+                 icon=":material/flag:")
 
 
 with ui.card("gl_logs"):
@@ -412,7 +417,7 @@ ui.css("""
     border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; background: var(--subtle);
     transition: border-color .25s var(--ease), background-color .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease);
 }
-.gl-tile:hover { border-color: var(--brand-200); background: var(--surface); transform: translateY(-2px); box-shadow: var(--shadow-card); }
+.gl-tile:hover { border-color: var(--card-hover-line); background: var(--surface); }
 .gl-tile-k { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 500; color: var(--ink-500); }
 .gl-tile-k i { color: var(--brand-500); }
 .gl-tile-v { margin-top: 6px; font-size: 1.05rem; font-weight: 600; color: var(--ink-900); }

@@ -1,4 +1,3 @@
-import pandas as pd
 import streamlit as st
 
 import charts
@@ -28,6 +27,16 @@ def _save_threshold(key: str) -> None:
         st.toast(str(e), icon=":material/error:")
         return
     st.toast(f"At-risk threshold set to {st.session_state[key]} days for all users.", icon=":material/check_circle:")
+    # The most valuable at-risk guests go to Marketing automatically (no manual picking).
+    try:
+        sent = repo.auto_send_at_risk()
+    except Exception:  # noqa: BLE001 - the threshold is saved even if sending fails
+        st.toast("The threshold was saved, but guests could not be sent to Marketing. Please try again.",
+                 icon=":material/error:")
+        return
+    if sent:
+        st.toast(f"{sent} at-risk guest{'s' if sent != 1 else ''} sent to the Marketing Team automatically.",
+                 icon=":material/send:")
 
 # ---------------------------------------------------------------------------
 # Alert banner
@@ -128,9 +137,16 @@ with ui.card("ar_chart"):
 # ---------------------------------------------------------------------------
 # Guest list
 # ---------------------------------------------------------------------------
+RISK_DOT = {"High Risk": "red", "Medium Risk": "amber", "Low Risk": "green"}
+
+
+def _tag(text: str, tone: str) -> str:
+    return f'<span class="gt-tag gt-tag-{tone}">{ui.esc(text)}</span>'
+
+
 with ui.card("ar_list"):
     with st.container(horizontal=True, vertical_alignment="center"):
-        ui.card_title("At-Risk Guest List")
+        ui.card_title("At-Risk Guest List", "High-value guests who need a prioritised retention follow-up")
         st.space("stretch")
         with st.container(key="ar_sortbox", horizontal=True, vertical_alignment="center", width="content"):
             st.html('<span class="ds-pager-info">Sort by:</span>')
@@ -139,42 +155,17 @@ with ui.card("ar_list"):
 
     ui.data_table("ar", page, [
         ui.Col("Guest ID", 1.0, kind="guest_link"),
-        ui.Col("Predicted CLV (KSh)", 1.4, lambda r: f'<span class="ds-strong">{r["predicted_clv"]:,}</span>'),
-        ui.Col("Days Since Last Stay", 1.4, lambda r: f'<span class="ds-text-red">{r["days_since_last_stay"]} days</span>'),
-        ui.Col("Prev. Stays", 0.9, lambda r: str(r["total_previous_stays"])),
-        ui.Col("Risk Level", 1.1, lambda r: ui.pill(r["risk_level"], ui.RISK_TONE[r["risk_level"]])),
-        ui.Col("Recommended Action", 2.0, lambda r: ui.pill(r["recommended_action"], ui.action_tone(r["recommended_action"]))),
-        ui.Col("Marketing", 1.1, lambda r: ui.pill("Sent", "green") if r.get("is_priority") else
-               '<span class="ds-td" style="color:var(--ink-400)">—</span>'),
+        ui.Col("Predicted CLV (KSh)", 1.3, lambda r: f'<span class="gt-num">{r["predicted_clv"]:,}</span>'),
+        ui.Col("Days Since Last Stay", 1.3,
+               lambda r: f'<span class="gt-days"><i class="gt-dot gt-dot-{RISK_DOT[r["risk_level"]]}"></i>'
+                         f'{r["days_since_last_stay"]} days</span>'),
+        ui.Col("Prev. Stays", 0.9, lambda r: f'<span class="gt-muted">{r["total_previous_stays"]}</span>'),
+        ui.Col("Risk Level", 1.1, lambda r: _tag(r["risk_level"], RISK_DOT[r["risk_level"]])),
+        ui.Col("Recommended Action", 1.9, lambda r: _tag(r["recommended_action"], "action")),
+        ui.Col("Marketing", 0.9, lambda r: _tag("Sent", "green") if r.get("is_priority") else
+               '<span class="gt-muted">—</span>'),
     ])
     ui.pagination_bar("ar", len(rows))
-
-# ---------------------------------------------------------------------------
-# What next: hand at-risk guests to the Marketing Team as priority retention cases
-# ---------------------------------------------------------------------------
-if repo.decisions_enabled():
-    with ui.card("ar_send"):
-        ui.card_title("Send to Marketing for retention",
-                      "Chosen guests are flagged as Priority: they appear at the top of the Marketing Team's Action "
-                      "Board with their recommended action, and the outcome is tracked in the guest's action log.",
-                      fa="paper-plane")
-        not_sent = rows[~rows.get("is_priority", pd.Series(False, index=rows.index)).astype(bool)]
-        choices = not_sent["guest_id"].head(200).tolist()
-        with st.form("ar_send_form", border=False, clear_on_submit=True):
-            picked = st.multiselect("Guests to send (from the list above, highest first)", choices,
-                                    default=[g for g in page["guest_id"] if g in choices][:8],
-                                    placeholder="Choose at-risk guests")
-            reason = st.text_input("Reason", value="At-risk high-value guest: retention follow-up needed.")
-            if st.form_submit_button(f"Send to Marketing", type="primary", icon=":material/send:"):
-                try:
-                    sent = repo.record_priority(picked, reason)
-                except ValueError as e:
-                    st.toast(str(e), icon=":material/error:")
-                    sent = 0
-                if sent:
-                    st.toast(f"{sent} guest{'s' if sent != 1 else ''} sent to the Marketing Team as priority.",
-                             icon=":material/check_circle:")
-                    st.rerun()
 
 ui.css("""
 .st-key-ar_banner {
@@ -196,6 +187,8 @@ ui.css("""
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"] { background: var(--red-600) !important; border-color: var(--red-600) !important; }
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"]:hover { background: var(--red-700) !important; border-color: var(--red-700) !important; }
 .st-key-ar_sortbox { gap: 8px !important; }
+
+.st-key-card_ar_list [data-testid="stButtonGroup"] { background: #F1F4F2; border: 1px solid var(--line); }
 .ar-hist { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 0.85rem;
            border-bottom: 1px solid var(--line); color: var(--ink-800); }
 .ar-hist span { color: var(--ink-500); }

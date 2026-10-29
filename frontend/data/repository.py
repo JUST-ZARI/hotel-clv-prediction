@@ -488,6 +488,7 @@ def log_action(guest_id: str, action_taken: str, delivery_channel: str,
     _client().table("action_logs").insert(row).execute()
     _recent_completed.clear()
     _completed_actions.clear()
+    _actions_for.clear()
 
 
 def sends_last_24h() -> int:
@@ -514,6 +515,8 @@ def set_outcome(log_id: str, outcome: str) -> None:
         raise PermissionError("Only the Marketing Team can record outcomes.")
     _recent_completed.clear()
     _completed_actions.clear()
+    if outcome == "Came back":
+        _decisions.clear()      # the database removes the guest's Priority flag (009 trigger)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -715,6 +718,59 @@ def record_priority(guest_ids: list[str], reason: str) -> int:
     client.table("rm_decisions").insert(rows).execute()
     _decisions.clear()
     return len(rows)
+
+
+AUTO_SEND_LIMIT = 50   # at-risk guests sent to Marketing automatically each time the threshold changes
+
+
+def auto_send_at_risk(limit: int = AUTO_SEND_LIMIT) -> int:
+    """Send the most valuable at-risk guests not already sent to Marketing as priority (Revenue Manager only).
+
+    Runs when the Revenue Manager changes the at-risk threshold. Each guest is recorded in RM_DECISIONS
+    with an automatic reason, exactly like a manual send, so the history stays complete.
+    """
+    if not decisions_enabled():
+        return 0
+    rows = at_risk()
+    if "is_priority" in rows.columns:
+        rows = rows[~rows["is_priority"].astype(bool)]
+    top = rows.sort_values("predicted_clv", ascending=False)["guest_id"].head(limit).tolist()
+    return record_priority(top, f"Sent automatically: at risk after {at_risk_days()} days "
+                                f"(top {limit} by predicted CLV, rule set by the Revenue Manager).")
+
+
+INBOX_COLUMNS = ["guest_id", "decided_at", "reason"]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _actions_for(_client, guest_ids: tuple[str, ...], since: str) -> pd.DataFrame:
+    """When each of these guests last had an action logged (since `since`)."""
+    found: list[dict] = []
+    ids = list(guest_ids)
+    for i in range(0, len(ids), 150):            # keep each request URL short
+        res = (_client.table("action_logs").select("guest_id, logged_at")
+               .in_("guest_id", ids[i:i + 150]).gte("logged_at", since).execute())
+        found += _rows(res)
+    df = pd.DataFrame(found, columns=["guest_id", "logged_at"])
+    df["logged_at"] = pd.to_datetime(df["logged_at"], utc=True)
+    return df
+
+
+def marketing_inbox() -> pd.DataFrame:
+    """Priority guests the Revenue Manager sent to Marketing with no action logged since they were sent.
+
+    Newest first. A guest leaves the list as soon as Marketing logs an action for them
+    (or the Revenue Manager removes the priority flag).
+    """
+    state = _decision_state(_decisions(_client()))
+    sent = pd.DataFrame([{"guest_id": g, "decided_at": s["priority"]["decided_at"], "reason": s["priority"]["reason"]}
+                         for g, s in state.items() if s["priority"]], columns=INBOX_COLUMNS)
+    if sent.empty:
+        return sent
+    acts = _actions_for(_client(), tuple(sorted(sent["guest_id"])), sent["decided_at"].min().isoformat())
+    last_action = sent["guest_id"].map(acts.groupby("guest_id")["logged_at"].max())
+    handled = (last_action >= sent["decided_at"]).fillna(False).astype(bool)
+    return sent[~handled].sort_values("decided_at", ascending=False).reset_index(drop=True)
 
 
 def settings_history(key: str = "at_risk_days", limit: int = 10) -> pd.DataFrame:
