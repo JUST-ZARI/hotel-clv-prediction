@@ -65,8 +65,9 @@ with st.container(key="auth_card"):
         f"""
         <div class="auth-head">
             <div class="auth-mark">{icon("right-to-bracket")}</div>
+            <div class="auth-eyebrow">Welcome back</div>
             <div class="auth-title">Login</div>
-            <div class="auth-sub">Access guest value predictions, segments and recommended actions.</div>
+            <div class="auth-sub auth-sub-muted">Your insights start here</div>
         </div>
         """,
         unsafe_allow_html=True,

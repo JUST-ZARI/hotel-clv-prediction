@@ -1,5 +1,6 @@
 import streamlit as st
 
+import alerts
 import auth
 from data import repository as repo
 from style import inject_global_css
@@ -69,6 +70,13 @@ else:
     if pg.url_path not in {p.url_path for p in allowed}:
         st.switch_page(allowed[0])
     counts = {"at-risk": repo.overview()["at_risk_high_value"]} if role == RM else {}
+    if role == MK:
+        # Priority guests sent by the Revenue Manager and not yet actioned: badge, pop-up and live notice.
+        inbox = alerts.inbox()
+        if not inbox.empty:
+            counts["action-board"] = len(inbox)
     render_sidebar(allowed, current=pg.url_path, counts=counts)
+    if role == MK:
+        alerts.marketing_alerts(inbox)
 
 pg.run()

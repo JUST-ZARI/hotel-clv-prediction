@@ -59,7 +59,7 @@ st.html("""
 }
 .hero-pill i { color: var(--mint-300); }
 .hero-title {
-    font-size: clamp(2.2rem, 3.6vw, 3rem) !important; line-height: 1.04 !important; font-weight: 700 !important;
+    font-size: clamp(2.3rem, 3.2vw, 3.1rem) !important; line-height: 1.04 !important; font-weight: 700 !important;
     color: #FFFFFF !important; margin: 0 0 18px !important; padding: 0 !important; text-shadow: 0 2px 18px rgba(0,0,0,.25);
 }
 .hero-title span { display: block; color: var(--mint-300); }
@@ -86,7 +86,7 @@ st.html("""
     transition: transform .3s var(--ease), box-shadow .3s var(--ease);
     animation: ds-rise .6s var(--ease) both;
 }
-.pv-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-pop); }
+.pv-card:hover { border-color: var(--card-hover-line); }
 .pv-card:nth-child(2) { animation-delay: .1s; } .pv-card:nth-child(3) { animation-delay: .2s; } .pv-card:nth-child(4) { animation-delay: .3s; }
 .pv-main { grid-row: span 3; display: flex; flex-direction: column; }
 .pv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -144,7 +144,7 @@ st.html("""
     background: linear-gradient(160deg, var(--brand-500), var(--brand-700)); color: #FFFFFF; font-size: 1.1rem;
     transition: transform .3s var(--ease);
 }
-.feats > div:hover .ico { transform: translateY(-3px); }
+
 .feats .t { font-size: 1.1rem; font-weight: 700; color: var(--ink-900); margin: 14px 0 6px; }
 .feats .d { font-size: 0.92rem; line-height: 1.5; color: var(--ink-500); }
 .home-loc { display: flex; justify-content: flex-end; gap: 14px; align-items: center; margin: 14px 0 0; font-size: 0.92rem; color: var(--ink-500); }
@@ -169,7 +169,7 @@ st.html("""
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
     padding: 24px; box-shadow: var(--shadow-xs); transition: transform .3s var(--ease), box-shadow .3s var(--ease);
 }
-.feat:hover { transform: translateY(-3px); box-shadow: var(--shadow-card); }
+.feat:hover { border-color: var(--card-hover-line); }
 .tile {
     width: 42px; height: 42px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
     background: var(--brand-50); color: var(--brand-600); font-size: 1rem;
@@ -189,7 +189,7 @@ st.html("""
     border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-xs);
     transition: transform .25s var(--ease), border-color .25s var(--ease);
 }
-.flow-row:hover { transform: translateX(4px); border-color: var(--brand-200); }
+.flow-row:hover { border-color: var(--card-hover-line); }
 .flow-row .tile { flex-shrink: 0; }
 .flow-row .t { font-size: 1.05rem; font-weight: 700; color: var(--ink-900); }
 .flow-row .s { font-size: 0.92rem; color: var(--ink-500); margin-top: 2px; }
@@ -236,7 +236,7 @@ st.html("""
     box-shadow: var(--shadow-xs);
     transition: transform .25s var(--ease), box-shadow .25s var(--ease), border-color .25s var(--ease);
 }
-.ds-step:hover { transform: translateX(4px); box-shadow: var(--shadow-card); border-color: var(--brand-200); border-left-color: var(--brand-600); }
+.ds-step:hover { border-color: var(--card-hover-line); border-left-color: var(--brand-600); }
 .ds-step-ico {
     width: 52px; height: 52px; flex-shrink: 0; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
     background: var(--brand-50); color: var(--brand-600); font-size: 1.25rem;
@@ -247,7 +247,7 @@ st.html("""
     margin-left: auto; flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
     background: var(--brand-50); color: var(--brand-600); transition: background-color .25s var(--ease), color .25s var(--ease), transform .25s var(--ease);
 }
-.ds-step:hover .ds-step-go { background: var(--brand-600); color: #FFFFFF; transform: translateX(2px); }
+.ds-step:hover .ds-step-go { background: var(--brand-600); color: #FFFFFF; }
 .ds-step-pill {
     margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 99px;
     background: var(--brand-50); color: var(--brand-700); font-weight: 700; font-size: 0.92rem;
@@ -442,14 +442,14 @@ with st.container(key="home_root"):
         <div class="steps">
             <div class="feat step">
                 <span class="tile">{icon("database")}</span><span class="step-num">01</span>
-                <div class="feat-title">Historical Booking Data</div>
-                <div class="feat-desc">Two public hotel booking datasets are harmonised and prepared for analysis.</div>
+                <div class="feat-title">Hotel Booking Data Analysis</div>
+                <div class="feat-desc">Hotel booking data is analysed to uncover guest booking patterns, revenue trends, and customer value insights.</div>
             </div>
             <div class="step-arrow">{icon("arrow-right")}</div>
             <div class="feat step">
                 <span class="tile">{icon("microchip")}</span><span class="step-num">02</span>
                 <div class="feat-title">CLV Prediction</div>
-                <div class="feat-desc">Random Forest and XGBoost were compared; XGBoost predicts each guest's CLV.</div>
+                <div class="feat-desc">Predict guest Customer Lifetime Value (CLV) to identify high-value guests and support smarter revenue management decisions.</div>
             </div>
             <div class="step-arrow">{icon("arrow-right")}</div>
             <div class="feat step">

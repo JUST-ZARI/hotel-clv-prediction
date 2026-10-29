@@ -5,7 +5,7 @@ backgroundColor = "#F4F7F5"
 secondaryBackgroundColor = "#EAF4ED"
 textColor = "#0F1A15"
 borderColor = "#D0DAD4"
-font = "'Times New Roman', Times, serif"
+font = "Inter, 'Segoe UI', system-ui, sans-serif"
 baseRadius = "8px"
 
 [client]
