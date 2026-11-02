@@ -79,7 +79,7 @@ AREA = {"revenue_manager": "Revenue Management", "marketing": "Marketing", "admi
 
 
 def page_header(title: str, subtitle: str) -> None:
-    area = AREA.get(st.session_state.get("role"), "Decision Support System")
+    area = AREA.get(st.session_state.get("role", ""), "Decision Support System")
     st.html(f"""
     <header class="ds-page-head">
         <div>
@@ -213,7 +213,8 @@ def data_table(key: str, rows: pd.DataFrame, cols: list[Col], empty: str = "No g
                             if st.button("View Guest", key=f"{key}_view_{gid}"):
                                 view_guest(gid)
                     else:
-                        cell.html(f'<span class="ds-td ds-{c.align}">{c.render(row)}</span>')
+                        content = c.render(row) if c.render else ""
+                        cell.html(f'<span class="ds-td ds-{c.align}">{content}</span>')
 
 
 def paginate(key: str, total: int, page_size: int = PAGE_SIZE) -> tuple[int, int]:
