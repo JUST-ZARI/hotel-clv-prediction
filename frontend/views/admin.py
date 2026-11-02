@@ -1,4 +1,4 @@
-"""System Administration: staff accounts, invitations and system health.
+"""System Administration: staff accounts and invitations.
 
 The administrator manages the system, not the business: they cannot open the
 guest dashboards and the database does not let them read guest data (007).
@@ -19,7 +19,7 @@ from style import alert
 auth.require_auth({"admin"})
 client = auth.user_client()
 
-ui.page_header("System Administration", "Staff accounts, invitations and system health")
+ui.page_header("System Administration", "")
 
 
 def _ts(value) -> str:
@@ -87,7 +87,7 @@ def _issue(email: str, role: str) -> None:
 
 
 with ui.card("adm_invite"):
-    ui.card_title("Invite a staff member", "A single-use code is generated and emailed. It expires after 7 days.")
+    ui.card_title("Invite a staff member")
     with st.form("adm_invite_form", border=False, clear_on_submit=True):
         c1, c2 = st.columns([2, 1], gap="small")
         email = c1.text_input("Email address", placeholder="name@hotel.com")
@@ -172,24 +172,3 @@ with ui.card("adm_users"):
                 except auth.AuthFailure as e:
                     st.toast(e.message, icon=":material/error:")
                 st.rerun()
-
-
-# ---------------------------------------------------------------------------
-# System health
-# ---------------------------------------------------------------------------
-with ui.card("adm_health"):
-    ui.card_title("System health")
-    if latest:
-        rows = [("Model in use", latest["model_used"]),
-                ("Predictions loaded", _ts(latest["loaded_at"])),
-                ("Guests predicted", f"{latest['guests_predicted']:,}"),
-                ("Test performance", f"R² {float(latest['test_r2']):.3f} · MAE KSh {float(latest['test_mae']):,.0f}"),
-                ("Prediction runs kept", f"{len(run)} (the newest is shown in the dashboards)"),
-                ("Email", "Configured" if messaging.email_ready() else "Not configured"),
-                ("SMS", ("Configured" + (" (sandbox)" if messaging.is_sandbox() else "")) if messaging.sms_ready()
-                 else "Not configured")]
-        st.html('<table class="ds-table"><tbody>' + "".join(
-            f'<tr><td class="muted">{ui.esc(k)}</td><td class="ds-strong">{ui.esc(v)}</td></tr>' for k, v in rows)
-            + "</tbody></table>")
-    else:
-        alert("warning", "No prediction run has been loaded. Run supabase/load_predictions.py.")

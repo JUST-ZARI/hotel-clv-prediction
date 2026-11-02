@@ -194,5 +194,4 @@ with ui.card("insights"):
                          for c in by_channel["delivery_channel"]],
                         "chart_ci_channel", "return_rate_by_channel")
 
-        ui.note("Return rate counts only actions with a recorded result. A guest coming back shows what happened "
-                "after the action, not proof that the action caused it.")
+        ui.note("A guest's subsequent return is an observed outcome following an action.")
