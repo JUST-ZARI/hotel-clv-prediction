@@ -29,7 +29,7 @@ def _save_threshold(key: str) -> None:
     st.toast(f"At-risk threshold set to {st.session_state[key]} days for all users.", icon=":material/check_circle:")
     # The most valuable at-risk guests go to Marketing automatically (no manual picking).
     try:
-        sent = repo.auto_send_at_risk()
+        sent, held = repo.auto_send_at_risk()
     except Exception:  # noqa: BLE001 - the threshold is saved even if sending fails
         st.toast("The threshold was saved, but guests could not be sent to Marketing. Please try again.",
                  icon=":material/error:")
@@ -37,6 +37,9 @@ def _save_threshold(key: str) -> None:
     if sent:
         st.toast(f"{sent} at-risk guest{'s' if sent != 1 else ''} sent to the Marketing Team automatically.",
                  icon=":material/send:")
+    if held:
+        st.toast(f"{held} guest{'s' if held != 1 else ''} held back at random as a control group "
+                 "(not contacted, to measure whether actions work).", icon=":material/science:")
 
 # ---------------------------------------------------------------------------
 # Alert banner
@@ -144,6 +147,17 @@ def _tag(text: str, tone: str) -> str:
     return f'<span class="gt-tag gt-tag-{tone}">{ui.esc(text)}</span>'
 
 
+control = repo.control_guests()
+
+
+def _marketing(r) -> str:
+    if r.get("is_priority"):
+        return _tag("Sent", "green")
+    if r["guest_id"] in control:
+        return _tag("Control group", "amber")
+    return '<span class="gt-muted">—</span>'
+
+
 with ui.card("ar_list"):
     with st.container(horizontal=True, vertical_alignment="center"):
         ui.card_title("At-Risk Guest List", "High-value guests who need a prioritised retention follow-up")
@@ -162,8 +176,7 @@ with ui.card("ar_list"):
         ui.Col("Prev. Stays", 0.9, lambda r: f'<span class="gt-muted">{r["total_previous_stays"]}</span>'),
         ui.Col("Risk Level", 1.1, lambda r: _tag(r["risk_level"], RISK_DOT[r["risk_level"]])),
         ui.Col("Recommended Action", 1.9, lambda r: _tag(r["recommended_action"], "action")),
-        ui.Col("Marketing", 0.9, lambda r: _tag("Sent", "green") if r.get("is_priority") else
-               '<span class="gt-muted">—</span>'),
+        ui.Col("Marketing", 0.9, _marketing),
     ])
     ui.pagination_bar("ar", len(rows))
 

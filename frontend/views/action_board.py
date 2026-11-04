@@ -110,10 +110,12 @@ with ui.card("actions"):
     ui.reset_page_on_change("ab", tier, action, show, query)
     start, end = ui.paginate("ab", len(rows))
 
+    control = repo.control_guests()
     cols = [
         ui.Col("Guest ID", 1.1, kind="guest_link"),
         ui.Col("CLV Tier", 1.3, lambda r: ui.tier_badge(r["tier_badge"])
-               + (" " + ui.pill("Priority", "navy") if r.get("is_priority") else "")),
+               + (" " + ui.pill("Priority", "navy") if r.get("is_priority") else "")
+               + (" " + ui.pill("Control group", "amber") if r["guest_id"] in control else "")),
     ]
     if rm:
         cols.append(ui.Col("Predicted CLV (KSh)", 1.6, lambda r: f'<span class="gt-num">{r["predicted_clv"]:,}</span>'))
@@ -195,3 +197,47 @@ with ui.card("insights"):
                         "chart_ci_channel", "return_rate_by_channel")
 
         ui.note("A guest's subsequent return is an observed outcome following an action.")
+
+
+# ---------------------------------------------------------------------------
+# Control group — contacted at-risk guests compared with guests held out at random
+# ---------------------------------------------------------------------------
+def _rate(s: dict) -> str:
+    return f"{s['rate']:.0%}" if s["rate"] is not None else "–"
+
+
+with ui.card("control"):
+    ui.card_title("Control Group", "Do actions bring guests back? Contacted at-risk guests compared with "
+                  "at-risk guests held back from contact at random", fa="scale-balanced")
+    group = repo.control_group()
+    if group.empty:
+        ui.note(f"No guests held back yet. Each time the Revenue Manager changes the at-risk threshold, "
+                f"{repo.CONTROL_SHARE:.0%} of the guests sent to Marketing are held back at random and not "
+                f"contacted.")
+    else:
+        cmp = repo.control_comparison(PERIODS[period])
+        c, h, up = cmp["contacted"], cmp["control"], cmp["uplift"]
+        ui.kpi_row([
+            ui.Kpi("Contacted", _rate(c), f"{c['came_back']} of {c['known']} came back · {period.lower()}",
+                   "paper-plane", "brand"),
+            ui.Kpi("Not Contacted", _rate(h), f"{h['came_back']} of {h['known']} came back · {period.lower()}",
+                   "user-slash", "amber"),
+            ui.Kpi("Difference", f"{up * 100:+.0f} points" if up is not None else "–",
+                   "Contacted minus not contacted" if up is not None
+                   else f"Shown once each group has {repo.CONTROL_MIN_RESULTS} results", "scale-balanced",
+                   "green" if up is not None and up > 0 else "neutral"),
+        ])
+
+        # Waiting guests first (they still need an outcome), newest first.
+        rows = (group.assign(_waiting=group["outcome"].eq("Waiting"))
+                .sort_values(["_waiting", "logged_at"], ascending=[False, False]))
+        start, end = ui.paginate("cg", len(rows))
+        ui.data_table("cg", rows.iloc[start:end], [
+            ui.Col("Guest ID", 1.1, kind="guest_link"),
+            ui.Col("Held Back On", 1.4, lambda r: f'{r["logged_at"]:%d %b %Y, %H:%M}'),
+            ui.Col("Outcome", 1.3, lambda r: ui.pill(r["outcome"], ui.OUTCOME_TONE[r["outcome"]])),
+            ui.Col("", 1.0, kind="view_button"),
+        ], empty="No guests held back yet.")
+        ui.pagination_bar("cg", len(rows))
+        ui.note("Held-back guests are not contacted while their outcome is waiting. Open a guest to record "
+                "whether they came back.")

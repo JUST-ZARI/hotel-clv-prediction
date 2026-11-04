@@ -90,7 +90,7 @@ skip this step. To rebuild them, open the notebooks in Google Colab and run them
 ### 2. Set up the database
 
 In your Supabase project, open the **SQL Editor** and run the files in `supabase/` in order, from `001_users.sql`
-to `008_drop_marketing_consent.sql`. They create the tables and the access rules for each role.
+to `010_control_group.sql`. They create the tables and the access rules for each role.
 
 ### 3. Add your keys
 
@@ -158,7 +158,7 @@ hotel-clv-prediction/
 ├── docs/                   # data pipeline notes
 │
 ├── supabase/
-│   ├── 001_users.sql … 009_clear_priority_on_return.sql
+│   ├── 001_users.sql … 010_control_group.sql
 │   ├── load_predictions.py     # loads predictions into the database
 │   ├── verify_setup.py         # checks the setup and access rules
 │   └── create_admin_invite.py  # invites the first administrator
