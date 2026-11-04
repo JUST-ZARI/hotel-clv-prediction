@@ -51,6 +51,10 @@ if st.session_state.get("_lookup_error"):
 
 g = repo.get_guest(st.session_state["lookup_guest_id"])
 gid = g["guest_id"]
+in_control = gid in repo.control_guests()   # held back at random: not contacted while the outcome is waiting
+CONTROL_NOTE = ("This guest is in the control group: they were held back from contact at random so the team can "
+                "measure whether actions work. Do not contact them; record whether they came back in the "
+                "Action Logs below.")
 
 # ---------------------------------------------------------------------------
 # Derived insights
@@ -75,6 +79,8 @@ def _decision_panel(guest_id: str, g: pd.Series, decision: dict) -> None:
     if decision["priority"]:
         choices.remove("Flag priority")
         choices.append("Remove priority")
+    elif in_control:     # a control guest must not be sent to Marketing while their outcome is waiting
+        choices.remove("Flag priority")
     labels = {"Override action": "Use a different action", "Flag priority": "Flag as priority guest",
               "Clear override": "Go back to the model's action", "Remove priority": "Remove priority flag"}
     with st.expander("Revenue Manager decision", icon=":material/gavel:"):
@@ -167,7 +173,8 @@ with left:
         <div class="gl-profile-head">
             <div><div class="gl-k">Guest Profile</div><div class="gl-id">{ui.esc(gid)}</div></div>
             <div class="gl-badges">{ui.tier_badge(g["tier_badge"])}
-            {ui.pill("Priority (Revenue Manager)", "navy") if g["is_priority"] else ""}</div>
+            {ui.pill("Priority (Revenue Manager)", "navy") if g["is_priority"] else ""}
+            {ui.pill("Control group: do not contact", "amber") if in_control else ""}</div>
         </div>
         <div class="gl-metrics">{cells}</div>""")
 
@@ -201,7 +208,9 @@ with right:
         <div class="gl-rec-v">{ui.esc(g["recommended_action"])}</div>
         <div class="gl-rec-r">Reason: {ui.esc(g["recommended_action_reason"])}</div>
         {f'<div class="gl-rec-r">Model suggested: {ui.esc(g["model_action"])}</div>' if overridden else ""}""")
-        if not rm:
+        if not rm and in_control:
+            ui.note("Control group guest: no action is logged while the outcome is waiting.")
+        elif not rm:
             if st.button("Log Action", type="primary", width="stretch", key="gl_log"):
                 _log(gid, g["recommended_action"], "Dashboard", "Pending")
         elif repo.decisions_enabled():
@@ -245,17 +254,32 @@ with ui.card("gl_timeline"):
             else '<div class="gl-more">No earlier stays</div>')
     st.html(f'<div class="gl-stays">{items}{more}</div>')
 
-def _messages(action: str) -> tuple[str, dict[str, str]]:
-    """Email subject plus Email and SMS text for a recommended action, written as the hotel."""
+TEMPLATES = ["Win-back offer", "Suite upgrade", "Loyalty thank-you", "Seasonal news"]
+
+
+def _template_for(action: str) -> str:
+    """The message template that matches a recommended action."""
     a = action.lower()
     if "upsell" in a:
+        return "Suite upgrade"
+    if any(k in a for k in ("loyalty", "concierge")):
+        return "Loyalty thank-you"
+    if "cost-efficient" in a:
+        return "Seasonal news"
+    return "Win-back offer"     # win-back, retention and re-engagement actions
+
+
+def _messages(template: str, name: str = "") -> tuple[str, dict[str, str]]:
+    """Email subject plus Email and SMS text for a template, written as the hotel and addressed to the guest."""
+    name = " ".join(name.split())
+    if template == "Suite upgrade":
         subject = f"An upgrade for your next stay at {HOTEL_NAME}"
         lead = ("As one of our valued guests, we would like to make your next stay even more special. "
                 "On your next booking we are pleased to offer you an upgrade to one of our suites, "
                 "with late check-out and breakfast for two included, subject to availability.")
         sms = (f"{HOTEL_NAME}: As a valued guest, enjoy a suite upgrade with breakfast for two and late "
                f"check-out on your next stay. Reply to this message to reserve. T&Cs apply.")
-    elif any(k in a for k in ("loyalty", "concierge")):
+    elif template == "Loyalty thank-you":
         subject = f"Thank you for staying with {HOTEL_NAME}"
         lead = ("Thank you for choosing us time and again. As a token of our appreciation, you are invited "
                 "to enjoy exclusive member privileges on your next visit, including a complimentary welcome "
@@ -263,20 +287,23 @@ def _messages(action: str) -> tuple[str, dict[str, str]]:
                 "detail of your stay.")
         sms = (f"{HOTEL_NAME}: Thank you for staying with us. Enjoy priority check-in and a complimentary "
                f"welcome drink on your next visit. Reply to this message to book.")
-    elif "cost-efficient" in a:
+    elif template == "Seasonal news":
         subject = f"What's new at {HOTEL_NAME}"
         lead = ("We have some exciting news to share: our restaurant has a new seasonal menu, and our "
                 "weekend packages are now available at special rates. We would love to welcome you back.")
         sms = (f"{HOTEL_NAME}: Our new seasonal menu and weekend packages are here. "
                f"Reply to this message to book your stay.")
-    else:   # win-back, retention and re-engagement actions
+    else:   # Win-back offer
         subject = f"We miss you at {HOTEL_NAME}"
         lead = ("It has been a while since your last visit, and we would love to welcome you back. "
                 "As a valued guest, you are invited to enjoy a special returning-guest rate on your next "
                 "stay, together with a complimentary room upgrade, subject to availability.")
         sms = (f"{HOTEL_NAME}: We miss you! Enjoy a special returning-guest rate and a complimentary room "
                f"upgrade on your next stay. Reply to this message to book. T&Cs apply.")
-    email = (f"Dear Valued Guest,\n\n"
+    if name:   # "Hotel: We miss you!" → "Hotel: Dear Jane, we miss you!"
+        body = sms.removeprefix(f"{HOTEL_NAME}: ")
+        sms = f"{HOTEL_NAME}: Dear {name}, {body[:1].lower()}{body[1:]}"
+    email = (f"Dear {name or 'Valued Guest'},\n\n"
              f"Warm greetings from {HOTEL_NAME}.\n\n"
              f"{lead}\n\n"
              f"To reserve, simply reply to this email and our reservations team will be glad to assist you.\n\n"
@@ -290,20 +317,44 @@ def _messages(action: str) -> tuple[str, dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Execute recommended action — Marketing Team
 # ---------------------------------------------------------------------------
-if not rm:
+def _fill_messages() -> None:
+    """Write the subject and messages from the chosen template and guest name (replaces any edits)."""
+    subject, texts = _messages(st.session_state["gl_template"], st.session_state.get("gl_name", ""))
+    for ch in CHANNELS:
+        st.session_state[f"gl_message_{ch}"] = texts[ch]
+    st.session_state["gl_subject"] = subject
+
+
+if not rm and in_control:
+    with ui.card("gl_execute"):
+        ui.card_title("Execute Recommended Action", fa="paper-plane")
+        alert("info", CONTROL_NOTE)
+elif not rm:
     with ui.card("gl_execute"):
         with st.container(horizontal=True, vertical_alignment="center"):
             ui.card_title("Execute Recommended Action", fa="paper-plane")
             st.space("stretch")
             st.html(f'<span class="ds-chip ds-chip-role-mt">{role_label(st.session_state.role)}</span>')
         channel = st.selectbox("Delivery channel", list(CHANNELS), key="gl_channel")
-        # Guest-ready message for the recommended action, filled in for the guest on screen (editable).
-        subject, defaults = _messages(g["recommended_action"])
-        if st.session_state.get("_gl_msg_for") != gid:   # new guest: fresh text for every channel
-            for ch in CHANNELS:
-                st.session_state[f"gl_message_{ch}"] = defaults[ch]
-            st.session_state["gl_subject"] = subject
+        # Guest-ready message: the template that matches the recommended action, addressed to the guest (editable).
+        MSG_KEYS = ["gl_template", "gl_name", "gl_subject", *(f"gl_message_{ch}" for ch in CHANNELS)]
+        if st.session_state.get("_gl_msg_for") != gid:   # new guest: start again from the matching template
+            for k in MSG_KEYS:
+                st.session_state.pop(k, None)
             st.session_state["_gl_msg_for"] = gid
+        # Fill anything missing (a new guest, or a box Streamlit cleared while it was hidden).
+        st.session_state.setdefault("gl_template", _template_for(g["recommended_action"]))
+        st.session_state.setdefault("gl_name", "")
+        subject, texts = _messages(st.session_state["gl_template"], st.session_state["gl_name"])
+        st.session_state.setdefault("gl_subject", subject)
+        for ch in CHANNELS:
+            st.session_state.setdefault(f"gl_message_{ch}", texts[ch])
+        with st.container(horizontal=True, key="gl_template_row"):
+            st.selectbox("Message template", TEMPLATES, key="gl_template", on_change=_fill_messages,
+                         help="Starts on the template that matches the recommended action.")
+            st.text_input("Guest name (optional)", key="gl_name", max_chars=60, placeholder="e.g. Jane Wanjiru",
+                          on_change=_fill_messages,
+                          help="Fills in the greeting. Changing the template or the name rewrites the message.")
 
         ready = messaging.email_ready() if channel == "Email" else messaging.sms_ready()
         recipient = st.text_input(
@@ -348,7 +399,7 @@ if not rm:
 # Action logs
 # ---------------------------------------------------------------------------
 logs = repo.action_logs(gid)
-status_tone = {"Completed": "green", "Pending": "amber", "Failed": "red"}
+status_tone = {"Completed": "green", "Pending": "amber", "Failed": "red", repo.HELD_OUT: "neutral"}
 LOG_COLS = [("Action Taken", 2.2), ("Channel", 1.2), ("Status", 1.0), ("Time Stamp", 1.5), ("User", 1.3),
             ("Outcome", 1.6)]
 
@@ -388,7 +439,7 @@ with ui.card("gl_logs"):
                 c[2].html(f'<span class="ds-td">{ui.pill(r.action_status, status_tone.get(r.action_status, "neutral"))}</span>')
                 c[3].html(f'<span class="ds-td" style="color:var(--ink-500)">{r.logged_at:%d %b %Y, %H:%M}</span>')
                 c[4].html(f'<span class="ds-td">{ui.esc(r.user_name or role_label(r.user_role))}</span>')
-                if r.action_status != "Completed" or not isinstance(r.outcome, str):
+                if r.action_status not in ("Completed", repo.HELD_OUT) or not isinstance(r.outcome, str):
                     c[5].html('<span class="ds-td" style="color:var(--ink-400)">—</span>')
                 elif rm:
                     c[5].html(f'<span class="ds-td">{ui.pill(r.outcome, ui.OUTCOME_TONE[r.outcome])}</span>')

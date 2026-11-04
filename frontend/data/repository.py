@@ -18,6 +18,7 @@ signed-in staff may read all guests); action logs and settings are read fresh.
 from __future__ import annotations
 
 import logging
+import random
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -515,6 +516,7 @@ def set_outcome(log_id: str, outcome: str) -> None:
         raise PermissionError("Only the Marketing Team can record outcomes.")
     _recent_completed.clear()
     _completed_actions.clear()
+    _held_out.clear()
     if outcome == "Came back":
         _decisions.clear()      # the database removes the guest's Priority flag (009 trigger)
 
@@ -723,20 +725,112 @@ def record_priority(guest_ids: list[str], reason: str) -> int:
 AUTO_SEND_LIMIT = 50   # at-risk guests sent to Marketing automatically each time the threshold changes
 
 
-def auto_send_at_risk(limit: int = AUTO_SEND_LIMIT) -> int:
+def auto_send_at_risk(limit: int = AUTO_SEND_LIMIT) -> tuple[int, int]:
     """Send the most valuable at-risk guests not already sent to Marketing as priority (Revenue Manager only).
 
-    Runs when the Revenue Manager changes the at-risk threshold. Each guest is recorded in RM_DECISIONS
-    with an automatic reason, exactly like a manual send, so the history stays complete.
+    Runs when the Revenue Manager changes the at-risk threshold. A random CONTROL_SHARE of the guests is
+    held out (not contacted) as a control group; the rest are recorded in RM_DECISIONS with an automatic
+    reason, exactly like a manual send. Returns (guests sent, guests held out).
     """
     if not decisions_enabled():
-        return 0
+        return 0, 0
     rows = at_risk()
     if "is_priority" in rows.columns:
         rows = rows[~rows["is_priority"].astype(bool)]
+    rows = rows[~rows["guest_id"].isin(control_guests())]
     top = rows.sort_values("predicted_clv", ascending=False)["guest_id"].head(limit).tolist()
-    return record_priority(top, f"Sent automatically: at risk after {at_risk_days()} days "
-                                f"(top {limit} by predicted CLV, rule set by the Revenue Manager).")
+    control = random.sample(top, int(len(top) * CONTROL_SHARE))
+    held = 0
+    if control:
+        try:
+            held = hold_out(control)
+        except APIError:     # 010 not run yet: send every guest
+            control = []
+    send = [g for g in top if g not in set(control)]
+    sent = record_priority(send, f"Sent automatically: at risk after {at_risk_days()} days "
+                                 f"(top {limit} by predicted CLV, rule set by the Revenue Manager).")
+    return sent, held
+
+
+# ---------------------------------------------------------------------------
+# Control group (010) — at-risk guests held out at random and not contacted, so the
+# return rate of contacted guests can be compared with guests who were left alone.
+# Stored in ACTION_LOGS with status 'Held out'; Marketing records the outcome as usual.
+# ---------------------------------------------------------------------------
+
+CONTROL_SHARE = 0.10       # share of each automatic send that is held out
+CONTROL_ACTION = "No contact (control group)"
+HELD_OUT = "Held out"
+CONTROL_MIN_RESULTS = 10   # known outcomes needed in each group before the two are compared
+CONTROL_COLUMNS = ["log_id", "guest_id", "outcome", "logged_at"]
+
+
+def hold_out(guest_ids: list[str]) -> int:
+    """Record guests as held out of contact (Revenue Manager, during an automatic send)."""
+    if not guest_ids:
+        return 0
+    client = _client()
+    preds = _rows(client.table("clv_predictions").select("guest_id, prediction_id")
+                  .eq("predicted_at", _run()["predicted_at"]).in_("guest_id", list(guest_ids)).execute())
+    by_guest = {p["guest_id"]: p["prediction_id"] for p in preds}
+    uid = st.session_state.get("user_id")
+    rows = [{"user_id": uid, "guest_id": g, "prediction_id": by_guest.get(g), "action_taken": CONTROL_ACTION,
+             "action_status": HELD_OUT, "delivery_channel": "No contact", "outcome": "Waiting"}
+            for g in guest_ids]
+    client.table("action_logs").insert(rows).execute()
+    _held_out.clear()
+    _actions_for.clear()
+    return len(rows)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _held_out(_client) -> pd.DataFrame:
+    """Every held-out guest, newest first (empty if 010 has not been run)."""
+    res = (_client.table("action_logs").select(", ".join(CONTROL_COLUMNS)).eq("action_status", HELD_OUT)
+           .order("logged_at", desc=True).execute())
+    df = pd.DataFrame(_rows(res), columns=CONTROL_COLUMNS)
+    df["outcome"] = df["outcome"].fillna("Waiting")
+    df["logged_at"] = pd.to_datetime(df["logged_at"], utc=True).dt.tz_convert("Africa/Nairobi")
+    return df
+
+
+def control_group() -> pd.DataFrame:
+    return _held_out(_client())
+
+
+def control_guests() -> set[str]:
+    """Guests held out whose outcome is still waiting: they must not be contacted."""
+    df = control_group()
+    return set(df.loc[df["outcome"] == "Waiting", "guest_id"])
+
+
+def _group_stats(outcomes: pd.Series) -> dict:
+    known = outcomes[outcomes.isin(["Came back", "Didn't come back"])]
+    came = int((known == "Came back").sum())
+    return {"known": len(known), "came_back": came, "waiting": int((outcomes == "Waiting").sum()),
+            "rate": came / len(known) if len(known) else None}
+
+
+def control_comparison(days: int) -> dict:
+    """Return rate of contacted at-risk guests vs the control group over the last `days` days.
+
+    Contacted = completed actions for guests the Revenue Manager sent to Marketing (the same kind of
+    guest the control group is drawn from). `uplift` is None until each group has CONTROL_MIN_RESULTS
+    known outcomes.
+    """
+    since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
+    ctrl = control_group()
+    ctrl = ctrl[ctrl["logged_at"] >= since]
+    decisions = _decisions(_client())
+    sent = set() if decisions is None else set(
+        decisions.loc[decisions["decision_type"] == "Flag priority", "guest_id"])
+    acts = _completed_actions(_client(), days)
+    acts = acts[acts["guest_id"].isin(sent)]
+    contacted = _group_stats(acts["outcome"].fillna("Waiting"))
+    control = _group_stats(ctrl["outcome"])
+    ready = min(contacted["known"], control["known"]) >= CONTROL_MIN_RESULTS
+    return {"contacted": contacted, "control": control,
+            "uplift": contacted["rate"] - control["rate"] if ready else None}
 
 
 INBOX_COLUMNS = ["guest_id", "decided_at", "reason"]

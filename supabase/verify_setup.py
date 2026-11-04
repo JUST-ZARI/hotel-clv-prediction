@@ -120,7 +120,7 @@ def main() -> int:
 
         ok, how = denied(lambda: user.table("action_logs").insert({
             "user_id": uid, "guest_id": guest_id, "action_taken": "x", "action_status": "Done?"}).execute())
-        check("action_status must be Pending/Completed/Failed", ok, how)
+        check("action_status must be Pending/Completed/Failed/Held out", ok, how)
 
         if log:
             lid = log[0]["log_id"]
