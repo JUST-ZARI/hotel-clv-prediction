@@ -14,6 +14,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import campaigns
 import components as ui
 from data import repository as repo
 
@@ -45,15 +46,17 @@ def show_priority() -> None:
 
 
 def scroll_to_list() -> None:
-    """Scroll to the Guest Action List once, after "Show priority guests" was clicked."""
-    if not st.session_state.pop("_ab_scroll", False):
+    """Scroll once to the card a banner button asked for (default: the Guest Action List)."""
+    target = st.session_state.pop("_ab_scroll", False)
+    if not target:
         return
+    card = target if isinstance(target, str) else "card_actions"
     n = st.session_state.get("_scroll_nonce", 0) + 1     # new content each time, so the script runs again
     st.session_state["_scroll_nonce"] = n
     st.html(f"""<script>/* {n} */
-    // Waits until the page below the list has loaded (so there is room to scroll), up to 5 seconds.
+    // Waits until the page below the card has loaded (so there is room to scroll), up to 5 seconds.
     (function go(tries) {{
-        const list = document.querySelector('.st-key-card_actions');
+        const list = document.querySelector('.st-key-{card}');
         const main = document.querySelector('[data-testid="stMain"]');
         if (list && main) {{
             const target = main.scrollTop + list.getBoundingClientRect().top - main.getBoundingClientRect().top - 16;
@@ -105,11 +108,28 @@ def _watch() -> None:
                  icon=":material/notifications_active:", duration="infinite")
 
 
+def overdue() -> pd.DataFrame:
+    """Outcomes waiting too long; empty if they cannot be read (alerts must never break a page)."""
+    try:
+        return repo.overdue_outcomes()
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame(columns=repo.OVERDUE_COLUMNS + ["days_waiting"])
+
+
+def _overdue_notice() -> None:
+    """Once per sign-in: remind Marketing about outcomes that have been waiting too long."""
+    n = len(overdue())
+    if n:
+        st.toast(f"**{n:,} outcome{'s' if n != 1 else ''}** waiting more than {repo.follow_up_days()} days. "
+                 "Record them on the Action Board.", icon=":material/schedule:", duration="long")
+
+
 def marketing_alerts(df: pd.DataFrame) -> None:
     """Run on every Marketing page (from app.py)."""
     if not st.session_state.get("_mk_popup_done"):
         st.session_state["_mk_popup_done"] = True
         st.session_state["_mk_seen_at"] = _latest(df)
+        _overdue_notice()
         if not df.empty:
             _popup(df)
     _watch()
@@ -139,8 +159,9 @@ def action_board_banner(df: pd.DataFrame) -> None:
             </div>
         </div>""")
         st.space("stretch")
-        st.button("Show priority guests", key="mk_alert_go", type="primary", icon=":material/filter_list:",
-                  on_click=show_priority)
+        st.button("Show priority guests", key="mk_alert_go", icon=":material/filter_list:", on_click=show_priority)
+        if st.button("Email priority guests", key="mk_bulk_go", type="primary", icon=":material/forward_to_inbox:"):
+            campaigns.open_bulk_email()
     ui.css("""
     .st-key-mk_alert { background: var(--navy-50); border: 1px solid var(--navy-200); border-radius: var(--r-lg);
                        padding: 14px 18px !important; gap: 14px !important; }

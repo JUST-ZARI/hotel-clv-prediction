@@ -517,8 +517,43 @@ def set_outcome(log_id: str, outcome: str) -> None:
     _recent_completed.clear()
     _completed_actions.clear()
     _held_out.clear()
+    _overdue.clear()
     if outcome == "Came back":
         _decisions.clear()      # the database removes the guest's Priority flag (009 trigger)
+
+
+# ---------------------------------------------------------------------------
+# Follow-up reminders — outcomes still 'Waiting' long after the action
+# ---------------------------------------------------------------------------
+
+FOLLOW_UP_DAYS = 14   # default; follow_up_days under [app] in secrets changes it (e.g. 0 for a demonstration)
+OVERDUE_COLUMNS = ["log_id", "guest_id", "action_taken", "action_status", "delivery_channel", "logged_at"]
+
+
+def follow_up_days() -> int:
+    try:
+        return max(0, int(st.secrets.get("app", {}).get("follow_up_days", FOLLOW_UP_DAYS)))
+    except (TypeError, ValueError):
+        return FOLLOW_UP_DAYS
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _overdue(_client, days: int) -> pd.DataFrame:
+    """Completed or held-out actions whose outcome has been 'Waiting' for more than `days` days, oldest first."""
+    now = datetime.now(timezone.utc)
+    res = (_client.table("action_logs").select(", ".join(OVERDUE_COLUMNS)).eq("outcome", "Waiting")
+           .in_("action_status", ["Completed", HELD_OUT]).lt("logged_at", (now - timedelta(days=days)).isoformat())
+           .order("logged_at").execute())
+    df = pd.DataFrame(_rows(res), columns=OVERDUE_COLUMNS)
+    df["logged_at"] = pd.to_datetime(df["logged_at"], utc=True)
+    df["days_waiting"] = (pd.Timestamp(now) - df["logged_at"]).dt.days.astype(int)
+    df["logged_at"] = df["logged_at"].dt.tz_convert("Africa/Nairobi")
+    return df
+
+
+def overdue_outcomes() -> pd.DataFrame:
+    """Outcomes Marketing should record (or follow up with a second message)."""
+    return _overdue(_client(), follow_up_days())
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -865,6 +900,31 @@ def marketing_inbox() -> pd.DataFrame:
     last_action = sent["guest_id"].map(acts.groupby("guest_id")["logged_at"].max())
     handled = (last_action >= sent["decided_at"]).fillna(False).astype(bool)
     return sent[~handled].sort_values("decided_at", ascending=False).reset_index(drop=True)
+
+
+BULK_COLUMNS = ["guest_id", "predicted_clv", "recommended_action"]
+
+
+def bulk_candidates() -> pd.DataFrame:
+    """Priority guests waiting for an action (never the control group), highest predicted CLV first."""
+    inbox = marketing_inbox()
+    if inbox.empty:
+        return pd.DataFrame(columns=BULK_COLUMNS)
+    ids = set(inbox["guest_id"]) - control_guests()
+    g = guests()
+    rows = g.loc[g["guest_id"].isin(ids), BULK_COLUMNS].copy()
+    rows["recommended_action"] = rows["recommended_action"].astype(str)
+    return rows.sort_values("predicted_clv", ascending=False).reset_index(drop=True)
+
+
+def guest_emails(guest_ids: list[str]) -> dict[str, str]:
+    """Stored email address of each guest (used only when bulk sending without a test recipient)."""
+    found: dict[str, str] = {}
+    for i in range(0, len(guest_ids), 150):
+        res = (_client().table("guests").select("guest_id, guest_email")
+               .in_("guest_id", guest_ids[i:i + 150]).execute())
+        found.update({r["guest_id"]: r["guest_email"] for r in _rows(res) if r.get("guest_email")})
+    return found
 
 
 def settings_history(key: str = "at_risk_days", limit: int = 10) -> pd.DataFrame:
