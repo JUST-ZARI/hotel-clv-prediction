@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import alerts
+import campaigns
 import charts
 import components as ui
 from auth import require_auth
@@ -15,8 +16,10 @@ rm = ui.is_revenue_manager()
 ui.page_header("Hotel Guest CLV Dashboard",
                "Overview of predicted customer lifetime value and recommended guest actions")
 
+overdue = alerts.overdue() if not rm else None
 if not rm:
     alerts.action_board_banner(alerts.inbox())
+    campaigns.follow_up_banner(overdue)
 
 # ---------------------------------------------------------------------------
 # Impact of recent actions (from ACTION_LOGS outcomes)
@@ -127,6 +130,9 @@ with ui.card("actions"):
     ]
     ui.data_table("ab", rows.iloc[start:end], cols)
     ui.pagination_bar("ab", len(rows))
+
+if not rm:
+    campaigns.follow_up_card(overdue)
 
 alerts.scroll_to_list()
 

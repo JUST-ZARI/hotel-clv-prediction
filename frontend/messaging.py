@@ -8,6 +8,7 @@ Configured in .streamlit/secrets.toml under [messaging] (see secrets.example.tom
     africastalking_username / africastalking_api_key   ("sandbox" = free test mode)
     africastalking_sender_id   optional approved sender name (default: the shared one)
     daily_limit          sends per staff member per 24 hours (default 20)
+    test_recipient       optional: bulk emails go to this address instead of the guests (test mode)
 
 Guests in the historical data have demo addresses (@example.com) and no
 marketing consent, so the app only sends to a *demo recipient* typed in by the
@@ -20,6 +21,8 @@ import html
 import re
 import smtplib
 import ssl
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import make_msgid
@@ -76,6 +79,17 @@ def daily_limit() -> int:
     return int(_cfg().get("daily_limit") or DEFAULT_DAILY_LIMIT)
 
 
+def test_recipient() -> str | None:
+    """Test mode: bulk emails go to this address instead of the guests (test_recipient under [messaging])."""
+    raw = str(_cfg().get("test_recipient") or "").strip()
+    if not raw or "YOUR-" in raw:
+        return None
+    try:
+        return normalize_email(raw)
+    except SendError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Recipients
 # ---------------------------------------------------------------------------
@@ -119,13 +133,8 @@ def mask(recipient: str) -> str:
 # Senders
 # ---------------------------------------------------------------------------
 
-def send_email(to: str, subject: str, body: str, hotel_name: str) -> SendResult:
-    if not email_ready():
-        raise SendError("Email is not set up. Add gmail_address and gmail_app_password under [messaging] in secrets.")
-    cfg = _cfg()
-    sender = str(cfg["gmail_address"]).strip()
-    to = normalize_email(to)
-
+def _email(sender: str, to: str, subject: str, body: str, hotel_name: str) -> EmailMessage:
+    """The email as plain text plus a simple branded HTML version."""
     msg = EmailMessage()
     msg["From"] = f"{hotel_name} <{sender}>"
     msg["To"] = to
@@ -143,16 +152,50 @@ def send_email(to: str, subject: str, body: str, hotel_name: str) -> SendResult:
   <p style="font-size:12px;color:#6b7280;text-align:center">Sent from the Hotel CLV decision support system
   (student project demonstration).</p>
 </div>""", subtype="html")
+    return msg
 
+
+@contextmanager
+def email_batch(hotel_name: str) -> Iterator[Callable[[str, str, str], SendResult]]:
+    """One Gmail connection for one or many emails. Yields send(to, subject, body) -> SendResult.
+
+    Raises SendError if email is not set up or Gmail refuses the login; each send raises
+    SendError for its own email only, so a bulk send can carry on with the next guest.
+    """
+    if not email_ready():
+        raise SendError("Email is not set up. Add gmail_address and gmail_app_password under [messaging] in secrets.")
+    cfg = _cfg()
+    sender = str(cfg["gmail_address"]).strip()
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=TIMEOUT) as smtp:
-            smtp.login(sender, str(cfg["gmail_app_password"]).replace(" ", ""))
-            smtp.send_message(msg)
+        smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=TIMEOUT)
+        smtp.login(sender, str(cfg["gmail_app_password"]).replace(" ", ""))
     except smtplib.SMTPAuthenticationError as e:
         raise SendError("Gmail rejected the login. Check gmail_address and the 16-letter app password.") from e
     except (smtplib.SMTPException, OSError) as e:
         raise SendError("The email could not be sent. Check the internet connection and try again.") from e
-    return SendResult(mask(to), str(msg["Message-ID"]))
+
+    def send(to: str, subject: str, body: str) -> SendResult:
+        to = normalize_email(to)
+        msg = _email(sender, to, subject, body, hotel_name)
+        try:
+            smtp.send_message(msg)
+        except (smtplib.SMTPException, OSError) as e:
+            raise SendError("The email could not be sent. Check the internet connection and try again.") from e
+        return SendResult(mask(to), str(msg["Message-ID"]))
+
+    try:
+        yield send
+    finally:
+        try:
+            smtp.quit()
+        except (smtplib.SMTPException, OSError):
+            pass
+
+
+def send_email(to: str, subject: str, body: str, hotel_name: str) -> SendResult:
+    normalize_email(to)     # a bad address is reported before connecting to Gmail
+    with email_batch(hotel_name) as send:
+        return send(to, subject, body)
 
 
 # ---------------------------------------------------------------------------

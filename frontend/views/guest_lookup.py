@@ -2,12 +2,14 @@ import pandas as pd
 import streamlit as st
 from postgrest.exceptions import APIError
 
+import alerts
 import charts
 import components as ui
 import messaging
 from auth import require_auth
 from data import repository as repo
 from style import alert, icon
+from templates import TEMPLATES, messages, template_for
 from utils import HOTEL_NAME, role_label
 
 require_auth()
@@ -254,72 +256,13 @@ with ui.card("gl_timeline"):
             else '<div class="gl-more">No earlier stays</div>')
     st.html(f'<div class="gl-stays">{items}{more}</div>')
 
-TEMPLATES = ["Win-back offer", "Suite upgrade", "Loyalty thank-you", "Seasonal news"]
-
-
-def _template_for(action: str) -> str:
-    """The message template that matches a recommended action."""
-    a = action.lower()
-    if "upsell" in a:
-        return "Suite upgrade"
-    if any(k in a for k in ("loyalty", "concierge")):
-        return "Loyalty thank-you"
-    if "cost-efficient" in a:
-        return "Seasonal news"
-    return "Win-back offer"     # win-back, retention and re-engagement actions
-
-
-def _messages(template: str, name: str = "") -> tuple[str, dict[str, str]]:
-    """Email subject plus Email and SMS text for a template, written as the hotel and addressed to the guest."""
-    name = " ".join(name.split())
-    if template == "Suite upgrade":
-        subject = f"An upgrade for your next stay at {HOTEL_NAME}"
-        lead = ("As one of our valued guests, we would like to make your next stay even more special. "
-                "On your next booking we are pleased to offer you an upgrade to one of our suites, "
-                "with late check-out and breakfast for two included, subject to availability.")
-        sms = (f"{HOTEL_NAME}: As a valued guest, enjoy a suite upgrade with breakfast for two and late "
-               f"check-out on your next stay. Reply to this message to reserve. T&Cs apply.")
-    elif template == "Loyalty thank-you":
-        subject = f"Thank you for staying with {HOTEL_NAME}"
-        lead = ("Thank you for choosing us time and again. As a token of our appreciation, you are invited "
-                "to enjoy exclusive member privileges on your next visit, including a complimentary welcome "
-                "drink, priority check-in and a dedicated guest relations contact who will arrange every "
-                "detail of your stay.")
-        sms = (f"{HOTEL_NAME}: Thank you for staying with us. Enjoy priority check-in and a complimentary "
-               f"welcome drink on your next visit. Reply to this message to book.")
-    elif template == "Seasonal news":
-        subject = f"What's new at {HOTEL_NAME}"
-        lead = ("We have some exciting news to share: our restaurant has a new seasonal menu, and our "
-                "weekend packages are now available at special rates. We would love to welcome you back.")
-        sms = (f"{HOTEL_NAME}: Our new seasonal menu and weekend packages are here. "
-               f"Reply to this message to book your stay.")
-    else:   # Win-back offer
-        subject = f"We miss you at {HOTEL_NAME}"
-        lead = ("It has been a while since your last visit, and we would love to welcome you back. "
-                "As a valued guest, you are invited to enjoy a special returning-guest rate on your next "
-                "stay, together with a complimentary room upgrade, subject to availability.")
-        sms = (f"{HOTEL_NAME}: We miss you! Enjoy a special returning-guest rate and a complimentary room "
-               f"upgrade on your next stay. Reply to this message to book. T&Cs apply.")
-    if name:   # "Hotel: We miss you!" → "Hotel: Dear Jane, we miss you!"
-        body = sms.removeprefix(f"{HOTEL_NAME}: ")
-        sms = f"{HOTEL_NAME}: Dear {name}, {body[:1].lower()}{body[1:]}"
-    email = (f"Dear {name or 'Valued Guest'},\n\n"
-             f"Warm greetings from {HOTEL_NAME}.\n\n"
-             f"{lead}\n\n"
-             f"To reserve, simply reply to this email and our reservations team will be glad to assist you.\n\n"
-             f"We look forward to welcoming you back.\n\n"
-             f"Warm regards,\n"
-             f"Guest Relations Team\n"
-             f"{HOTEL_NAME}, Nairobi")
-    return subject, {"Email": email, "SMS": sms}
-
 
 # ---------------------------------------------------------------------------
 # Execute recommended action — Marketing Team
 # ---------------------------------------------------------------------------
 def _fill_messages() -> None:
     """Write the subject and messages from the chosen template and guest name (replaces any edits)."""
-    subject, texts = _messages(st.session_state["gl_template"], st.session_state.get("gl_name", ""))
+    subject, texts = messages(st.session_state["gl_template"], st.session_state.get("gl_name", ""))
     for ch in CHANNELS:
         st.session_state[f"gl_message_{ch}"] = texts[ch]
     st.session_state["gl_subject"] = subject
@@ -335,6 +278,12 @@ elif not rm:
             ui.card_title("Execute Recommended Action", fa="paper-plane")
             st.space("stretch")
             st.html(f'<span class="ds-chip ds-chip-role-mt">{role_label(st.session_state.role)}</span>')
+        # An action for this guest has waited too long for an outcome: suggest a follow-up message.
+        late = alerts.overdue()
+        late = late[late["guest_id"] == gid]
+        if not late.empty:
+            alert("info", f"An action for this guest has waited {int(late['days_waiting'].max())} days for an "
+                          "outcome. Record it in the Action Logs below, or send a follow-up (template selected).")
         channel = st.selectbox("Delivery channel", list(CHANNELS), key="gl_channel")
         # Guest-ready message: the template that matches the recommended action, addressed to the guest (editable).
         MSG_KEYS = ["gl_template", "gl_name", "gl_subject", *(f"gl_message_{ch}" for ch in CHANNELS)]
@@ -343,9 +292,10 @@ elif not rm:
                 st.session_state.pop(k, None)
             st.session_state["_gl_msg_for"] = gid
         # Fill anything missing (a new guest, or a box Streamlit cleared while it was hidden).
-        st.session_state.setdefault("gl_template", _template_for(g["recommended_action"]))
+        st.session_state.setdefault("gl_template", "Follow-up" if not late.empty
+                                    else template_for(g["recommended_action"]))
         st.session_state.setdefault("gl_name", "")
-        subject, texts = _messages(st.session_state["gl_template"], st.session_state["gl_name"])
+        subject, texts = messages(st.session_state["gl_template"], st.session_state["gl_name"])
         st.session_state.setdefault("gl_subject", subject)
         for ch in CHANNELS:
             st.session_state.setdefault(f"gl_message_{ch}", texts[ch])
