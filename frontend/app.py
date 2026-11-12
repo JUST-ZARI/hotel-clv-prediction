@@ -43,7 +43,10 @@ PROTECTED_PAGES = {
     # Valuing bookings is revenue analysis: Revenue Manager only, like At-Risk Guests.
     st.Page("views/predict.py", title="Predict a Booking", icon=":material/online_prediction:",
             url_path="predict"): {RM},
-    # The administrator manages accounts and system health, not guest data (least privilege).
+    # Campaign cost against predicted value, and where the next budget works best: Revenue Manager only.
+    st.Page("views/campaign_roi.py", title="Campaign ROI", icon=":material/savings:",
+            url_path="campaign-roi"): {RM},
+    # The administrator manages staff accounts and invitations, not guest data (least privilege).
     st.Page("views/admin.py", title="Administration", icon=":material/admin_panel_settings:",
             url_path="admin"): {ADMIN},
 }
@@ -75,6 +78,11 @@ else:
         inbox = alerts.inbox()
         if not inbox.empty:
             counts["action-board"] = len(inbox)
+    if role == ADMIN:
+        # Access requests from the Create Account page waiting for a decision.
+        waiting = auth.pending_request_count(auth.user_client())
+        if waiting:
+            counts["admin"] = waiting
     render_sidebar(allowed, current=pg.url_path, counts=counts)
     if role == MK:
         alerts.marketing_alerts(inbox)

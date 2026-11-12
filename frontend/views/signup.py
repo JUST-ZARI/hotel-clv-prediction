@@ -87,6 +87,57 @@ def _wrap(field: str) -> str:
     return ("err_" if form.field(field) else "ok_") + "su_" + field
 
 
+REQUEST_LIMIT = 3     # requests from one browser session (the database also limits requests per hour)
+
+
+def _send_request() -> None:
+    """Runs before the dialog redraws, so the result shows straight away."""
+    s = st.session_state
+    if s.get("_rq_count", 0) >= REQUEST_LIMIT:
+        s["_rq_errors"] = {"form": "You have already sent several requests. Please wait for the administrator."}
+        return
+    problem = auth.config_error(for_signup=True)
+    if problem:
+        s["_rq_errors"] = {"form": problem}
+        return
+    try:
+        auth.request_access(s.get("rq_name", ""), s.get("rq_email", ""), s.get("rq_role", ""))
+    except auth.AuthFailure as e:
+        s["_rq_errors"] = {e.field or "form": e.message}
+    else:
+        s["_rq_count"] = s.get("_rq_count", 0) + 1
+        s["_rq_errors"] = {}
+        s["_rq_done"] = True
+
+
+@st.dialog("Request an invite")
+def _request_dialog() -> None:
+    """Ask the System Administrator for an invite code (name, email and role only)."""
+    s = st.session_state
+    if s.get("_rq_done"):
+        alert("success", auth.GENERIC_REQUEST_MESSAGE)
+        if st.button("Close", type="primary", width="stretch", key="rq_close"):
+            s.pop("_rq_done", None)
+            st.rerun()
+        return
+    errors = s.get("_rq_errors", {})
+    # Start from what was typed on the Create Account form.
+    s.setdefault("rq_name", s.get("su_name", ""))
+    s.setdefault("rq_email", s.get("su_email", ""))
+    st.text_input("Full name", key="rq_name", placeholder="e.g. Amina Wanjiru", icon=":material/person:",
+                  autocomplete="name")
+    field_error(errors.get("name"))
+    st.text_input("Work email", key="rq_email", placeholder="name@hotel.com", icon=":material/mail:",
+                  autocomplete="email")
+    field_error(errors.get("email"))
+    st.selectbox("Role you need", auth.REQUESTABLE_ROLES, format_func=auth.ROLES.get, key="rq_role")
+    field_error(errors.get("role"))
+    if errors.get("form"):
+        alert("error", errors["form"])
+    st.button("Send request", type="primary", width="stretch", icon=":material/send:", key="rq_send",
+              on_click=_send_request)
+
+
 if st.session_state.pop("_signup_done", False):
     st.switch_page(auth.LOGIN_PAGE)
 
@@ -134,6 +185,10 @@ with st.container(key="auth_card_wide"):
                       autocomplete="off", on_change=_clear, args=("token",),
                       help="Your role comes from the invitation. Codes work once and expire after 7 days.")
         field_error(form.field("token"))
+    with st.container(key="su_request_row", horizontal=True, horizontal_alignment="right"):
+        if st.button("Don't have a code? Request an invite", type="tertiary", key="su_request",
+                     icon=":material/mail:"):
+            _request_dialog()
 
     @st.fragment
     def _password_fields() -> None:
