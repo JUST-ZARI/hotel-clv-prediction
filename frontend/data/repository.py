@@ -34,6 +34,7 @@ from postgrest.exceptions import APIError
 from postgrest.types import CountMethod
 
 import auth
+import templates
 
 TIERS = ["High", "Medium", "Low"]
 AT_RISK_DEFAULT_DAYS = 60
@@ -432,6 +433,138 @@ def set_at_risk_days(days: int) -> None:
     _settings.clear()
 
 
+# ---------------------------------------------------------------------------
+# Campaign costs (011) — what a campaign costs the hotel, set by the Revenue Manager
+# ---------------------------------------------------------------------------
+
+MESSAGE_CHANNELS = ["Email", "SMS"]
+OFFERS = ["Win-back offer", "Suite upgrade", "Loyalty thank-you", "Seasonal news"]
+COST_DEFAULTS = {"Email": 5, "SMS": 1, "Win-back offer": 3000, "Suite upgrade": 5000,
+                 "Loyalty thank-you": 1500, "Seasonal news": 0}
+MAX_COST = 1_000_000
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cost_row(_client) -> dict | None:
+    res = _client.table("app_settings").select("value").eq("key", "campaign_costs").execute()
+    rows = _rows(res)
+    return rows[0]["value"] if rows else None
+
+
+def campaign_costs() -> tuple[dict[str, float], bool]:
+    """(costs in KSh, saved?) — the defaults are used until 011 has been run."""
+    saved = _cost_row(_client())
+    costs = dict(COST_DEFAULTS)
+    if isinstance(saved, dict):
+        costs.update({k: float(v) for k, v in saved.items() if k in COST_DEFAULTS and isinstance(v, (int, float))})
+    return costs, isinstance(saved, dict)
+
+
+def set_campaign_costs(costs: dict[str, float]) -> None:
+    """Revenue Manager only — enforced by RLS. Raises ValueError for bad values."""
+    clean = {}
+    for k in COST_DEFAULTS:
+        v = float(costs.get(k, 0))
+        if not 0 <= v <= MAX_COST:
+            raise ValueError(f"{k}: enter a cost from KSh 0 to KSh {MAX_COST:,}.")
+        clean[k] = round(v, 2)
+    res = (_client().table("app_settings")
+           .update({"value": clean, "updated_by": st.session_state.get("user_id"),
+                    "updated_at": datetime.now(timezone.utc).isoformat()})
+           .eq("key", "campaign_costs").execute())
+    if not _rows(res):
+        raise PermissionError("The costs could not be saved. Only the Revenue Manager can change them "
+                              "(and supabase/011_campaign_costs.sql must have been run).")
+    _cost_row.clear()
+
+
+def offer_for(action: str) -> str:
+    """The offer a recommended action makes: the message template it is sent with."""
+    return templates.template_for(action)
+
+
+def _with_costs(trends: pd.DataFrame, costs: dict[str, float]) -> pd.DataFrame:
+    """Completed actions with the guest's predicted CLV, the message cost and the offer cost."""
+    df = trends.copy()
+    df["predicted_clv"] = df["guest_id"].map(guests().set_index("guest_id")["predicted_clv"]).fillna(0).astype(float)
+    df["message_cost"] = df["delivery_channel"].map({c: costs[c] for c in MESSAGE_CHANNELS}).fillna(0).astype(float)
+    df["offer_cost"] = df["action_taken"].astype(str).map(lambda a: costs.get(offer_for(a), 0)).astype(float)
+    return df
+
+
+def campaign_roi(trends: pd.DataFrame, costs: dict[str, float], uplift: float | None = None,
+                 contacted_known: int = 0) -> dict:
+    """Cost of the completed actions in `trends` against the predicted CLV of the guests who came back.
+
+    Message costs are paid for every message; an offer costs the hotel only when the guest comes
+    back to use it (once per guest). `value` is predicted CLV, not booked revenue. With the control
+    group's uplift, only the extra returns the campaigns caused are credited (`extra_value`).
+    """
+    df = _with_costs(trends, costs)
+    came = df[df["outcome"] == "Came back"].drop_duplicates("guest_id", keep="last")
+    message_cost = float(df["message_cost"].sum())
+    offer_cost = float(came["offer_cost"].sum())
+    total = message_cost + offer_cost
+    value = float(came["predicted_clv"].sum())
+    extra_returns = extra_value = None
+    if uplift is not None and contacted_known:
+        extra_returns = max(0.0, uplift) * contacted_known
+        extra_value = extra_returns * float(df.drop_duplicates("guest_id")["predicted_clv"].mean())
+    return {"contacted": int(df["guest_id"].nunique()), "came_back": len(came), "message_cost": message_cost,
+            "offer_cost": offer_cost, "total_cost": total, "value": value,
+            "value_per_ksh": value / total if total else None,
+            "extra_returns": extra_returns, "extra_value": extra_value,
+            "extra_per_ksh": extra_value / total if extra_value is not None and total else None}
+
+
+BUDGET_MIN_RESULTS = 5   # known outcomes a tier needs before it is used for budget guidance
+
+
+def budget_guidance(trends: pd.DataFrame, costs: dict[str, float]) -> pd.DataFrame:
+    """Per CLV tier: past return rate, average CLV, expected cost and value per guest contacted.
+
+    value_per_ksh = (return rate × average predicted CLV) ÷ (message cost + return rate × offer cost).
+    Tiers with fewer than BUDGET_MIN_RESULTS known outcomes are marked enough=False.
+    """
+    df = _with_costs(trends, costs)
+    rows = []
+    for tier, g in df.groupby("clv_tier"):
+        known = g[g["outcome"] != "Waiting"]
+        rate = float((known["outcome"] == "Came back").mean()) if len(known) else None
+        avg_clv = float(g.drop_duplicates("guest_id")["predicted_clv"].mean())
+        cost = float(g["message_cost"].mean() + (rate or 0) * g["offer_cost"].mean())
+        value = (rate or 0) * avg_clv
+        rows.append({"clv_tier": tier, "actions": len(g), "known": len(known), "return_rate": rate,
+                     "avg_clv": avg_clv, "cost_per_contact": cost, "value_per_contact": value,
+                     "value_per_ksh": value / cost if cost else None,
+                     "enough": len(known) >= BUDGET_MIN_RESULTS})
+    out = pd.DataFrame(rows, columns=["clv_tier", "actions", "known", "return_rate", "avg_clv", "cost_per_contact",
+                                      "value_per_contact", "value_per_ksh", "enough"])
+    return out.sort_values(["enough", "value_per_ksh"], ascending=False, na_position="last").reset_index(drop=True)
+
+
+def budget_plan(guidance: pd.DataFrame, budget: float, available: dict[str, int]) -> pd.DataFrame:
+    """Spend the budget on the tiers with the most predicted value per KSh first, up to the guests available."""
+    left, rows = float(budget), []
+    for r in guidance[guidance["enough"]].itertuples():
+        n_avail = int(available.get(r.clv_tier, 0))
+        n = n_avail if r.cost_per_contact <= 0 else min(n_avail, int(left // r.cost_per_contact))
+        if n <= 0:
+            continue
+        cost = n * r.cost_per_contact
+        left -= cost
+        rows.append({"clv_tier": r.clv_tier, "guests": n, "cost": cost,
+                     "expected_returns": n * (r.return_rate or 0), "expected_value": n * r.value_per_contact})
+    return pd.DataFrame(rows, columns=["clv_tier", "guests", "cost", "expected_returns", "expected_value"])
+
+
+def available_by_tier() -> dict[str, int]:
+    """Guests on the Action Board in each tier, excluding the control group (who may not be contacted)."""
+    q = action_queue()
+    q = q[~q["guest_id"].isin(control_guests())]
+    return q["clv_tier"].astype(str).value_counts().to_dict()
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _staff(_client) -> dict[str, dict]:
     return {r["id"]: r for r in _rows(_client.table("staff_directory").select("id, full_name, role").execute())}
@@ -520,6 +653,28 @@ def set_outcome(log_id: str, outcome: str) -> None:
     _overdue.clear()
     if outcome == "Came back":
         _decisions.clear()      # the database removes the guest's Priority flag (009 trigger)
+
+
+def set_outcomes(log_ids: list[str], outcome: str) -> int:
+    """Record the same outcome for several actions in one update (Marketing Team, RLS). Returns rows saved."""
+    if outcome not in OUTCOMES:
+        raise ValueError(f"Unknown outcome: {outcome}")
+    if not log_ids:
+        return 0
+    res = (_client().table("action_logs")
+           .update({"outcome": outcome,
+                    "outcome_at": None if outcome == "Waiting" else datetime.now(timezone.utc).isoformat()})
+           .in_("log_id", list(log_ids)).execute())
+    saved = len(_rows(res))
+    if not saved:
+        raise PermissionError("Only the Marketing Team can record outcomes.")
+    _recent_completed.clear()
+    _completed_actions.clear()
+    _held_out.clear()
+    _overdue.clear()
+    if outcome == "Came back":
+        _decisions.clear()      # the 009 trigger removes each returning guest's Priority flag
+    return saved
 
 
 # ---------------------------------------------------------------------------

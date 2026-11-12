@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 import streamlit as st
+from postgrest.exceptions import APIError
+from postgrest.types import CountMethod
 
 ROLES = {
     "revenue_manager": "Revenue Manager",
@@ -297,7 +299,7 @@ def _is_rate_limited(err) -> bool:
 def sign_up(full_name: str, email: str, password: str, invite: dict) -> bool:
     """Create the Supabase Auth user and its USERS row with the invite's role, then use up the invite.
 
-    Returns True if Supabase requires email confirmation before first login.
+    Returns False: the login is created already confirmed (kept for the sign-up page).
     Raises AuthFailure with a user-facing message on any error.
     """
     from supabase_auth.errors import AuthApiError, AuthError
@@ -319,19 +321,21 @@ def sign_up(full_name: str, email: str, password: str, invite: dict) -> bool:
         _create_profile(admin, orphan.id, email, full_name, invite)
         return False
 
+    # The invite code was emailed to this address, so owning the email is already proven.
+    # Create the login already confirmed with the server key: Supabase sends no
+    # confirmation email, so its built-in email limit (about 2 an hour) cannot block sign-ups.
     try:
-        res = _anon_client().auth.sign_up({
+        res = admin.auth.admin.create_user({
             "email": email,
             "password": password,
-            "options": {"data": {"full_name": full_name}, "email_redirect_to": f"{app_url()}/login"},
+            "email_confirm": True,
+            "user_metadata": {"full_name": full_name},
         })
     except AuthApiError as err:
         if err.code in ("user_already_exists", "email_exists"):
             raise AuthFailure("This email is already registered. Sign in instead.", field="email")
         if err.code == "weak_password":
             raise AuthFailure(f"Password rejected: {err.message}")
-        if err.code == "signup_disabled":
-            raise AuthFailure("New sign-ups are currently disabled. Contact your administrator.")
         if _is_rate_limited(err):
             raise AuthFailure("Too many sign-up attempts. Please wait a few minutes and try again.")
         raise AuthFailure(f"Could not create account: {err.message}")
@@ -341,10 +345,6 @@ def sign_up(full_name: str, email: str, password: str, invite: dict) -> bool:
     user = res.user
     if user is None:
         raise AuthFailure("Could not create account. Please try again.")
-    # With email confirmation on, Supabase hides duplicates by returning a user
-    # with no identities instead of an error.
-    if user.identities is not None and len(user.identities) == 0:
-        raise AuthFailure("This email is already registered. Sign in instead.", field="email")
 
     try:
         _create_profile(admin, user.id, email, full_name, invite)
@@ -356,7 +356,7 @@ def sign_up(full_name: str, email: str, password: str, invite: dict) -> bool:
             pass
         raise
 
-    return res.session is None
+    return False    # already confirmed: they can sign in straight away
 
 
 def _create_profile(admin, user_id: str, email: str, full_name: str, invite: dict) -> None:
@@ -641,6 +641,125 @@ def set_active(user_id: str, active: bool) -> None:
         "deactivated_at": None if active else datetime.now(timezone.utc).isoformat(),
     }).eq("id", user_id).execute()
     _service_client().auth.admin.update_user_by_id(user_id, {"ban_duration": "none" if active else "876000h"})
+
+
+# =====================================================================
+# Access requests (012) — "Request an invite" on the Create Account page
+# =====================================================================
+# The visitor is not signed in, so the request is written by the app server with the
+# server key after it has been checked here. Only the administrator can read or decide
+# requests (RLS). Approving one sends a normal single-use invite.
+
+REQUESTABLE_ROLES = ("revenue_manager", "marketing")
+REQUESTS_PER_HOUR = 20      # across everyone: stops the public form being used to flood the admin
+GENERIC_REQUEST_MESSAGE = ("Your request has been sent to the System Administrator. If it is approved, "
+                           "you will receive an invite code by email.")
+
+
+@_service_boundary("send your request")
+def request_access(full_name: str, email: str, role: str) -> None:
+    """Record a request and email the administrators.
+
+    Shows the same result whether or not the email already has an account or a pending
+    request, so the form cannot be used to find out who works at the hotel.
+    """
+    full_name = " ".join((full_name or "").split())
+    email = normalize_email(email)
+    if not 2 <= len(full_name) <= 100:
+        raise AuthFailure("Enter your full name.", field="name")
+    if not is_valid_email(email) or len(email) > 254:
+        raise AuthFailure("Enter a valid email address.", field="email")
+    if role not in REQUESTABLE_ROLES:
+        raise AuthFailure("Choose the role you need.", field="role")
+
+    admin = _service_client()
+    since = datetime.fromtimestamp(time.time() - 3600, timezone.utc).isoformat()
+    recent = admin.table("access_requests").select("request_id", count=CountMethod.exact).limit(1) \
+        .gte("requested_at", since).execute().count or 0
+    if recent >= REQUESTS_PER_HOUR:
+        raise AuthFailure("Too many requests right now. Please try again in an hour.")
+    if admin.table("users").select("id").eq("email", email).limit(1).execute().data:
+        return      # already has an account: nothing to do, same message
+    if admin.table("access_requests").select("request_id").eq("email", email).eq("status", "Pending") \
+            .limit(1).execute().data:
+        return      # already waiting: do not notify the administrator again
+    try:
+        admin.table("access_requests").insert({"full_name": full_name, "email": email, "role": role}).execute()
+    except APIError as e:
+        if e.code == "23505":
+            return  # the same request was sent twice at once: one is enough
+        raise
+    _notify_admins(full_name, email, role)
+
+
+def _notify_admins(full_name: str, email: str, role: str) -> None:
+    """Email every active administrator; a failed email never fails the request (it is on the Admin page)."""
+    import messaging
+
+    admins = [r["email"] for r in _service_client().table("users").select("email").eq("role", "admin")
+              .eq("is_active", True).execute().data or []]
+    if not admins:
+        return
+    body = (f"Hello,\n\n{full_name} ({email}) has asked to join the Hotel CLV dashboard as {ROLES[role]}.\n\n"
+            f"Open {app_url()}/admin to approve the request (an invite code is emailed to them) or to "
+            f"decline it.\n\n— Hotel CLV Dashboard")
+    try:
+        with messaging.email_batch("Hotel CLV Dashboard") as send:
+            for to in admins:
+                with suppress(messaging.SendError):
+                    send(to, "New access request — Hotel CLV dashboard", body)
+    except messaging.SendError:
+        log.warning("Could not email the administrators about an access request")
+
+
+def access_requests(client, limit: int = 50) -> list[dict]:
+    """Recent access requests, pending first then newest (administrator's own session; RLS)."""
+    rows = client.table("access_requests").select("*").order("requested_at", desc=True).limit(limit).execute().data
+    return sorted(rows or [], key=lambda r: r["status"] != "Pending")
+
+
+def pending_request_count(client) -> int:
+    try:
+        return client.table("access_requests").select("request_id", count=CountMethod.exact).limit(1) \
+            .eq("status", "Pending").execute().count or 0
+    except Exception:  # noqa: BLE001 - 012 not run yet: no badge
+        return 0
+
+
+def decide_request(request: dict, approve: bool) -> str | None:
+    """Approve (create + email an invite; returns the code if the email failed) or decline a request."""
+    import messaging
+
+    client = _require_admin()
+    rows = client.table("access_requests")
+    # Claim the request first, so two administrators cannot both send an invite.
+    res = rows.update({
+        "status": "Approved" if approve else "Declined", "decided_by": st.session_state.get("user_id"),
+        "decided_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("request_id", request["request_id"]).eq("status", "Pending").execute()
+    if not res.data:
+        raise AuthFailure("This request was already decided.")
+    code = None
+    if approve:
+        try:
+            code = create_invite(request["email"], request["role"])
+        except Exception:
+            # e.g. they already have an account: put the request back so the admin can decline it
+            client.table("access_requests").update({"status": "Pending", "decided_by": None, "decided_at": None}) \
+                .eq("request_id", request["request_id"]).execute()
+            raise
+        try:
+            send_invite_email(request["email"], request["role"], code)
+            code = None
+        except messaging.SendError:
+            pass                                                   # shown to the admin to pass on by hand
+    else:
+        with suppress(messaging.SendError):
+            messaging.send_email(request["email"], "Your Hotel CLV dashboard request", (
+                f"Hello {request['full_name']},\n\nYour request to join the Hotel CLV dashboard was not approved. "
+                f"If you think this is a mistake, please contact the hotel's System Administrator.\n\n"
+                f"— System Administrator"), "Hotel CLV Dashboard")
+    return code
 
 
 def last_sign_ins() -> dict[str, str]:

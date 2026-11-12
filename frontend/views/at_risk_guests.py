@@ -8,8 +8,7 @@ from style import icon
 
 require_auth()
 
-ui.page_header("At-Risk High-Value Guests",
-               "High-value guests who have not returned within the selected inactivity period")
+ui.page_header("At-Risk High-Value Guests", "")
 
 rm = ui.is_revenue_manager()
 threshold = repo.at_risk_days()

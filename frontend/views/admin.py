@@ -70,6 +70,71 @@ ui.kpi_row([
 
 
 # ---------------------------------------------------------------------------
+# Access requests (from "Request an invite" on the Create Account page)
+# ---------------------------------------------------------------------------
+REQUEST_TONE = {"Pending": "amber", "Approved": "green", "Declined": "neutral"}
+
+
+def _decide(r: dict, approve: bool) -> None:
+    try:
+        code = auth.decide_request(r, approve)
+    except auth.AuthFailure as e:
+        st.session_state["_adm_rq_msg"] = ("warning", e.message, None)
+    except APIError:
+        st.session_state["_adm_rq_msg"] = ("error", "The request could not be updated. Please try again.", None)
+    else:
+        if not approve:
+            st.session_state["_adm_rq_msg"] = ("success", f"Request from {r['email']} declined.", None)
+        elif code:
+            st.session_state["_adm_rq_msg"] = ("warning", f"The invite for {r['email']} was created but the email "
+                                                          "failed. Give them the code below.", code)
+        else:
+            st.session_state["_adm_rq_msg"] = ("success", f"Invitation emailed to {r['email']}.", None)
+
+
+try:
+    requests = auth.access_requests(client)
+except APIError:
+    requests = None      # 012_access_requests.sql not run yet
+
+if requests is not None:
+    waiting = [r for r in requests if r["status"] == "Pending"]
+    decided = [r for r in requests if r["status"] != "Pending"]
+    with ui.card("adm_requests"):
+        ui.card_title("Access requests", f"{len(waiting)} waiting" if waiting else "")
+        msg = st.session_state.pop("_adm_rq_msg", None)
+        if msg:
+            alert(msg[0], msg[1])
+            if msg[2]:
+                st.code(msg[2], language=None)
+        if not waiting:
+            st.html('<div class="ds-empty">No requests waiting.</div>')
+        for r in waiting:
+            c = st.columns([1.8, 2.2, 1.4, 1.6, 2.4], gap="small", vertical_alignment="center")
+            c[0].html(f'<span class="ds-td ds-strong">{ui.esc(r["full_name"])}</span>')
+            c[1].html(f'<span class="ds-td">{ui.esc(r["email"])}</span>')
+            c[2].html(f'<span class="ds-td">{ui.esc(auth.ROLES.get(r["role"], r["role"]))}</span>')
+            c[3].html(f'<span class="ds-td" style="color:var(--ink-500)">{_ts(r["requested_at"])}</span>')
+            with c[4], st.container(horizontal=True, gap="small"):
+                if st.button("Approve & send invite", key=f"adm_rq_ok_{r['request_id']}", type="primary"):
+                    _decide(r, True)
+                    st.rerun()
+                if st.button("Decline", key=f"adm_rq_no_{r['request_id']}", type="tertiary"):
+                    _decide(r, False)
+                    st.rerun()
+        if decided:
+            with st.expander(f"Recently decided ({len(decided)})"):
+                for r in decided:
+                    c = st.columns([1.8, 2.2, 1.4, 1.0, 2.2], gap="small", vertical_alignment="center")
+                    c[0].html(f'<span class="ds-td">{ui.esc(r["full_name"])}</span>')
+                    c[1].html(f'<span class="ds-td">{ui.esc(r["email"])}</span>')
+                    c[2].html(f'<span class="ds-td">{ui.esc(auth.ROLES.get(r["role"], r["role"]))}</span>')
+                    c[3].html(f'<span class="ds-td">{ui.pill(r["status"], REQUEST_TONE[r["status"]])}</span>')
+                    c[4].html(f'<span class="ds-td" style="color:var(--ink-500)">{_ts(r["decided_at"])} · '
+                              f'{ui.esc(names.get(r["decided_by"], "—"))}</span>')
+
+
+# ---------------------------------------------------------------------------
 # Invite a staff member
 # ---------------------------------------------------------------------------
 def _issue(email: str, role: str) -> None:
@@ -149,8 +214,7 @@ def _change_role(uid: str, key: str) -> None:
 
 
 with ui.card("adm_users"):
-    ui.card_title("Staff accounts", "Change roles, or deactivate someone who has left. Deactivated accounts cannot "
-                                    "sign in, and any open session ends within five minutes.")
+    ui.card_title("Staff accounts")
     for u in users:
         me = u["id"] == st.session_state.get("user_id")
         c = st.columns([1.8, 2.2, 1.8, 1.1, 1.6, 1.3], gap="small", vertical_alignment="center")
