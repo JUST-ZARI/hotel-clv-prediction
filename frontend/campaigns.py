@@ -197,22 +197,102 @@ def follow_up_banner(df: pd.DataFrame) -> None:
     """)
 
 
+FU_COLS = [("", 0.35), ("Guest ID", 1.1), ("Action", 2.0), ("Sent On", 1.1), ("Waiting", 0.9), ("Outcome", 1.6)]
+
+
+def _sel_key(log_id: str) -> str:
+    return f"fu_sel_{log_id}"
+
+
+def _select_page(log_ids: list[str]) -> None:
+    on = st.session_state["fu_all"]
+    for i in log_ids:
+        st.session_state[_sel_key(i)] = on
+
+
+def _saved_toast(n: int, outcome: str) -> None:
+    st.toast(f"{n} outcome{'s' if n != 1 else ''} recorded: {outcome}.", icon=":material/check_circle:")
+    if outcome == "Came back":
+        st.toast("Guests who came back were removed from the Priority list automatically.", icon=":material/flag:")
+
+
+def _mark_selected(log_ids: list[str], outcome: str) -> None:
+    """Record one outcome for every ticked row on this page."""
+    chosen = [i for i in log_ids if st.session_state.get(_sel_key(i))]
+    if not chosen:
+        st.toast("Tick at least one guest first.", icon=":material/info:")
+        return
+    try:
+        n = repo.set_outcomes(chosen, outcome)
+    except (PermissionError, APIError):
+        st.toast("The outcomes could not be saved. Please try again.", icon=":material/error:")
+        return
+    for i in chosen:
+        st.session_state.pop(_sel_key(i), None)
+    st.session_state["fu_all"] = False
+    _saved_toast(n, outcome)
+
+
+def _mark_one(log_id: str, key: str) -> None:
+    """Outcome dropdown on a single row: saved straight away."""
+    outcome = st.session_state[key]
+    if outcome == "Waiting":
+        return
+    try:
+        repo.set_outcome(log_id, outcome)
+    except (PermissionError, APIError):
+        st.toast("The outcome could not be saved. Please try again.", icon=":material/error:")
+        return
+    st.session_state.pop(_sel_key(log_id), None)
+    _saved_toast(1, outcome)
+
+
 def follow_up_card(df: pd.DataFrame) -> None:
-    """List of overdue outcomes for the Marketing Team (shown only when there are some)."""
+    """Overdue outcomes for the Marketing Team, recorded one by one or many at once."""
     if df.empty:
         return
     days = repo.follow_up_days()
     with ui.card("followup"):
         ui.card_title("Outcomes to Record",
-                      f"Actions waiting more than {days} days for a result, oldest first. Open a guest to record "
-                      "whether they came back, or send a follow-up message.", fa="clock-rotate-left")
+                      f"Actions waiting more than {days} days for a result, oldest first.", fa="clock-rotate-left")
         start, end = ui.paginate("fu", len(df))
-        ui.data_table("fu", df.iloc[start:end], [
-            ui.Col("Guest ID", 1.1, kind="guest_link"),
-            ui.Col("Action", 2.0, lambda r: f'<span class="gt-tag gt-tag-action">{ui.esc(r["action_taken"])}</span>'),
-            ui.Col("Sent On", 1.3, lambda r: f'{r["logged_at"]:%d %b %Y}'),
-            ui.Col("Waiting", 1.0, lambda r: ui.pill(f'{r["days_waiting"]} days',
-                                                     "red" if r["days_waiting"] > 2 * days else "amber")),
-            ui.Col("", 1.0, kind="view_button"),
-        ], empty="No outcomes are overdue.")
+        page = df.iloc[start:end]
+        ids = page["log_id"].astype(str).tolist()
+
+        with st.container(key="fu_bulk", horizontal=True, vertical_alignment="center"):
+            st.checkbox("Select all on this page", key="fu_all", on_change=_select_page, args=(ids,))
+            st.space("stretch")
+            picked = sum(bool(st.session_state.get(_sel_key(i))) for i in ids)
+            st.html(f'<span class="fu-count">{picked} selected</span>')
+            st.button("Mark selected: Came back", key="fu_came", type="primary", icon=":material/check:",
+                      on_click=_mark_selected, args=(ids, "Came back"))
+            st.button("Mark selected: Didn't come back", key="fu_not", icon=":material/close:",
+                      on_click=_mark_selected, args=(ids, "Didn't come back"))
+
+        with st.container(key="tbl_fu", gap=None):
+            with st.container(key="tblhead_fu"):
+                head = st.columns([w for _, w in FU_COLS], gap="small", vertical_alignment="center")
+                for cell, (label, _) in zip(head, FU_COLS):
+                    cell.html(f'<span class="ds-th">{label}</span>')
+            for n, r in enumerate(page.itertuples()):
+                lid = str(r.log_id)
+                with st.container(key=f"tblrow_fu_{n}"):
+                    c = st.columns([w for _, w in FU_COLS], gap="small", vertical_alignment="center")
+                    c[0].checkbox("Select", key=_sel_key(lid), label_visibility="collapsed")
+                    with c[1], st.container(key=f"lnk_fu_{n}"):
+                        if st.button(r.guest_id, key=f"fu_id_{lid}", type="tertiary"):
+                            ui.view_guest(r.guest_id)
+                    tag = (ui.pill("Control group", "amber") if r.action_status == repo.HELD_OUT
+                           else f'<span class="gt-tag gt-tag-action">{ui.esc(r.action_taken)}</span>')
+                    c[2].html(f'<span class="ds-td">{tag}</span>')
+                    c[3].html(f'<span class="ds-td" style="color:var(--ink-500)">{r.logged_at:%d %b %Y}</span>')
+                    c[4].html(f'<span class="ds-td">{ui.pill(f"{r.days_waiting} days", "red" if r.days_waiting > 2 * days else "amber")}</span>')
+                    key = f"fu_out_{lid}"
+                    with c[5]:
+                        st.selectbox("Outcome", repo.OUTCOMES, key=key, label_visibility="collapsed",
+                                     on_change=_mark_one, args=(lid, key))
         ui.pagination_bar("fu", len(df))
+    ui.css("""
+    .st-key-fu_bulk { gap: 10px !important; margin-bottom: 8px; flex-wrap: wrap !important; }
+    .fu-count { font-size: 0.88rem; color: var(--ink-500); }
+    """)

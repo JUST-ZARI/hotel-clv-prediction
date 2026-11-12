@@ -15,7 +15,7 @@ from utils import HOTEL_NAME, role_label
 require_auth()
 rm = ui.is_revenue_manager()
 
-ui.page_header("Guest Lookup", "Search for an individual guest and review their predicted lifetime value")
+ui.page_header("Guest Lookup", "")
 
 CHANNELS = {"Email": "Send Email", "SMS": "Send SMS"}
 

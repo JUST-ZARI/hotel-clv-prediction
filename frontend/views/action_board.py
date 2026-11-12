@@ -13,8 +13,7 @@ from data import repository as repo
 require_auth()
 rm = ui.is_revenue_manager()
 
-ui.page_header("Hotel Guest CLV Dashboard",
-               "Overview of predicted customer lifetime value and recommended guest actions")
+ui.page_header("Hotel Guest CLV Dashboard", "")
 
 overdue = alerts.overdue() if not rm else None
 if not rm:
@@ -213,8 +212,7 @@ def _rate(s: dict) -> str:
 
 
 with ui.card("control"):
-    ui.card_title("Control Group", "Do actions bring guests back? Contacted at-risk guests compared with "
-                  "at-risk guests held back from contact at random", fa="scale-balanced")
+    ui.card_title("Control Group", fa="scale-balanced")
     group = repo.control_group()
     if group.empty:
         ui.note(f"No guests held back yet. Each time the Revenue Manager changes the at-risk threshold, "
@@ -245,5 +243,3 @@ with ui.card("control"):
             ui.Col("", 1.0, kind="view_button"),
         ], empty="No guests held back yet.")
         ui.pagination_bar("cg", len(rows))
-        ui.note("Held-back guests are not contacted while their outcome is waiting. Open a guest to record "
-                "whether they came back.")
