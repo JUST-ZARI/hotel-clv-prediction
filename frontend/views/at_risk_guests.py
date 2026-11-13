@@ -157,6 +157,44 @@ def _marketing(r) -> str:
     return '<span class="gt-muted">—</span>'
 
 
+def _can_send(r) -> bool:
+    """Not already with Marketing, and not held back as the control group."""
+    return not r.get("is_priority") and r["guest_id"] not in control
+
+
+# Manual send: the Revenue Manager ticks guests and sends them to Marketing
+# (the automatic send on a threshold change still runs as before).
+MANUAL_REASON = "Chosen by the Revenue Manager from the At-Risk list."
+can_pick = rm and repo.decisions_enabled()
+pickable = [r["guest_id"] for _, r in page.iterrows() if _can_send(r)] if can_pick else []
+
+
+def _select_page() -> None:
+    on = st.session_state["ar_all"]
+    for gid in pickable:
+        st.session_state[ui.select_key("ar", gid)] = on
+
+
+def _send_selected() -> None:
+    chosen = ui.selected("ar", pickable)
+    if not chosen:
+        st.toast("Tick at least one guest first.", icon=":material/info:")
+        return
+    reason = (st.session_state.get("ar_reason") or "").strip() or MANUAL_REASON
+    try:
+        sent = repo.record_priority(chosen, reason)
+    except ValueError as e:
+        st.toast(str(e), icon=":material/error:")
+        return
+    except Exception:  # noqa: BLE001 - network or permission problem
+        st.toast("The guests could not be sent. Please try again.", icon=":material/error:")
+        return
+    for gid in chosen:
+        st.session_state.pop(ui.select_key("ar", gid), None)
+    st.session_state["ar_all"] = False
+    st.toast(f"{sent} guest{'s' if sent != 1 else ''} sent to the Marketing Team.", icon=":material/send:")
+
+
 with ui.card("ar_list"):
     with st.container(horizontal=True, vertical_alignment="center"):
         ui.card_title("At-Risk Guest List", "High-value guests who need a prioritised retention follow-up")
@@ -166,7 +204,19 @@ with ui.card("ar_list"):
             st.segmented_control("Sort by", ["Predicted CLV", "Days Inactive"], key="ar_sort",
                                  default="Predicted CLV", required=True, label_visibility="collapsed")
 
-    ui.data_table("ar", page, [
+    if can_pick:
+        with st.container(key="ar_pick", horizontal=True, vertical_alignment="center"):
+            st.checkbox("Select all on this page", key="ar_all", on_change=_select_page,
+                        disabled=not pickable)
+            st.html(f'<span class="ar-count">{len(ui.selected("ar", pickable))} selected</span>')
+            st.space("stretch")
+            st.text_input("Reason", key="ar_reason", placeholder=MANUAL_REASON, label_visibility="collapsed",
+                          max_chars=200, width=340)
+            st.button("Send selected to Marketing", key="ar_send", type="primary", icon=":material/send:",
+                      on_click=_send_selected)
+
+    select_col = [ui.Col("", 0.35, _can_send, kind="select")] if can_pick else []
+    ui.data_table("ar", page, select_col + [
         ui.Col("Guest ID", 1.0, kind="guest_link"),
         ui.Col("Predicted CLV (KSh)", 1.3, lambda r: f'<span class="gt-num">{r["predicted_clv"]:,}</span>'),
         ui.Col("Days Since Last Stay", 1.3,
@@ -199,6 +249,8 @@ ui.css("""
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"] { background: var(--red-600) !important; border-color: var(--red-600) !important; }
 .stApp .st-key-ar_export_all button[data-testid^="stBaseButton"]:hover { background: var(--red-700) !important; border-color: var(--red-700) !important; }
 .st-key-ar_sortbox { gap: 8px !important; }
+.st-key-ar_pick { gap: 10px !important; margin-bottom: 8px; flex-wrap: wrap !important; }
+.ar-count { font-size: 0.88rem; color: var(--ink-500); white-space: nowrap; }
 
 .st-key-card_ar_list [data-testid="stButtonGroup"] { background: #F1F4F2; border: 1px solid var(--line); }
 .ar-hist { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 0.85rem;

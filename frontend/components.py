@@ -180,8 +180,18 @@ class Col:
     header: str
     width: float
     render: Callable[[pd.Series], str] | None = None   # returns HTML
-    kind: str = "html"                                  # html | guest_link | view_button
-    align: str = "left"
+    kind: str = "html"                                  # html | guest_link | view_button | select
+    align: str = "left"                                 # (select: render returns True if the row can be ticked)
+
+
+def select_key(table: str, guest_id: str) -> str:
+    """Session-state key of a row's tick box in a table with a "select" column."""
+    return f"{table}_sel_{guest_id}"
+
+
+def selected(table: str, guest_ids) -> list[str]:
+    """Guest IDs whose tick box is ticked in `table`."""
+    return [g for g in guest_ids if st.session_state.get(select_key(table, g))]
 
 
 def view_guest(guest_id: str) -> None:
@@ -212,6 +222,9 @@ def data_table(key: str, rows: pd.DataFrame, cols: list[Col], empty: str = "No g
                         with cell, st.container(key=f"view_{key}_{i}", horizontal_alignment="right"):
                             if st.button("View Guest", key=f"{key}_view_{gid}"):
                                 view_guest(gid)
+                    elif c.kind == "select":
+                        if c.render is None or c.render(row):
+                            cell.checkbox("Select", key=select_key(key, gid), label_visibility="collapsed")
                     else:
                         content = c.render(row) if c.render else ""
                         cell.html(f'<span class="ds-td ds-{c.align}">{content}</span>')
