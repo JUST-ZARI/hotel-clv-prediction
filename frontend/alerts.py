@@ -160,7 +160,7 @@ def action_board_banner(df: pd.DataFrame) -> None:
         </div>""")
         st.space("stretch")
         st.button("Show priority guests", key="mk_alert_go", icon=":material/filter_list:", on_click=show_priority)
-        if st.button("Email priority guests", key="mk_bulk_go", type="primary", icon=":material/forward_to_inbox:"):
+        if st.button("Contact priority guests", key="mk_bulk_go", type="primary", icon=":material/forward_to_inbox:"):
             campaigns.open_bulk_email()
     ui.css("""
     .st-key-mk_alert { background: var(--navy-50); border: 1px solid var(--navy-200); border-radius: var(--r-lg);

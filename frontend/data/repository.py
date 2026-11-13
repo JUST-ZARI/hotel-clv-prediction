@@ -479,8 +479,9 @@ def set_campaign_costs(costs: dict[str, float]) -> None:
 
 
 def offer_for(action: str) -> str:
-    """The offer a recommended action makes: the message template it is sent with."""
-    return templates.template_for(action)
+    """The offer a recommended action makes (a manager's call or invitation makes the win-back offer)."""
+    t = templates.template_for(action)
+    return t if t in OFFERS else "Win-back offer"
 
 
 def _with_costs(trends: pd.DataFrame, costs: dict[str, float]) -> pd.DataFrame:

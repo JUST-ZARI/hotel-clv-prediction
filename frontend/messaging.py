@@ -9,6 +9,7 @@ Configured in .streamlit/secrets.toml under [messaging] (see secrets.example.tom
     africastalking_sender_id   optional approved sender name (default: the shared one)
     daily_limit          sends per staff member per 24 hours (default 20)
     test_recipient       optional: bulk emails go to this address instead of the guests (test mode)
+    test_phone           optional: bulk SMS go to this number instead of the guests (test mode)
 
 Guests in the historical data have demo addresses (@example.com) and no
 marketing consent, so the app only sends to a *demo recipient* typed in by the
@@ -86,6 +87,17 @@ def test_recipient() -> str | None:
         return None
     try:
         return normalize_email(raw)
+    except SendError:
+        return None
+
+
+def test_phone() -> str | None:
+    """Test mode for bulk SMS: every SMS goes to this number instead of the guests (test_phone under [messaging])."""
+    raw = str(_cfg().get("test_phone") or "").strip()
+    if not raw or "YOUR-" in raw:
+        return None
+    try:
+        return normalize_phone(raw)
     except SendError:
         return None
 
