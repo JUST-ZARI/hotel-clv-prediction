@@ -69,6 +69,7 @@ def bulk_email() -> None:
                                     required=True, format_func=lambda n: f"{n} guests")
         emails: dict[str, str] = {}
         skipped = 0
+        waiting = len(cands)      # before guests without a usable address are left out
         if not test_to:
             emails = repo.guest_emails(cands["guest_id"].tolist())
             ok = cands["guest_id"].map(lambda g: _valid_email(emails.get(g)))
@@ -77,7 +78,7 @@ def bulk_email() -> None:
         batch = cands.head(min(size or DEFAULT_BATCH, left))
 
         st.html(f"""<ul class="bk-list">
-            <li><b>{len(cands):,}</b> priority guest{"s" if len(cands) != 1 else ""} waiting for an action</li>
+            <li><b>{waiting:,}</b> priority guest{"s" if waiting != 1 else ""} waiting for an action</li>
             <li><b>{left}</b> of {limit} emails left today (daily limit)</li>
             <li>This batch: <b>{len(batch)}</b> guest{"s" if len(batch) != 1 else ""}, highest predicted CLV first,
                 each with the template that matches their recommended action</li></ul>""")
@@ -144,20 +145,96 @@ def _send(batch: pd.DataFrame, emails: dict[str, str], test_to: str | None) -> d
     return {"sent": sent, "failed": failed, "error": None, "unlogged": unlogged, "test": bool(test_to)}
 
 
-def _results(done: dict) -> None:
+def open_selected_email(rows: pd.DataFrame) -> None:
+    """Button handler: email the guests Marketing ticked on the Guest Action List."""
+    st.session_state.pop("_bulk_done", None)
+    st.session_state["_sel_batch"] = rows[["guest_id", "recommended_action"]].astype(str).to_dict("records")
+    selected_email()
+
+
+def _clear_ticks() -> None:
+    """Done: untick the Guest Action List after a send."""
+    for k in [k for k in st.session_state if str(k).startswith("ab_sel_")]:
+        del st.session_state[k]
+    st.session_state["ab_all"] = False
+
+
+@st.dialog("Send recommended action", width="medium")
+def selected_email() -> None:
+    """Email each ticked guest the template that matches their recommended action."""
+    done = st.session_state.get("_bulk_done")
+    if done:
+        _results(done, on_done=_clear_ticks)
+        return
+
+    form = st.empty()
+    with form.container():
+        picked = pd.DataFrame(st.session_state.get("_sel_batch", []), columns=["guest_id", "recommended_action"])
+        test_to = messaging.test_recipient()
+        limit = messaging.daily_limit()
+        left = max(0, limit - repo.sends_last_24h())
+        emails: dict[str, str] = {}
+        skipped = 0
+        if not test_to and not picked.empty:
+            emails = repo.guest_emails(picked["guest_id"].tolist())
+            ok = picked["guest_id"].map(lambda g: _valid_email(emails.get(g)))
+            skipped = int((~ok).sum())
+            picked = picked[ok]
+        batch = picked.head(left)
+
+        counts = batch["recommended_action"].value_counts()
+        st.html(f"""<ul class="bk-list">
+            <li><b>{len(batch)}</b> guest{"s" if len(batch) != 1 else ""} selected</li>
+            {"".join(f"<li>{n} × {ui.esc(a)}</li>" for a, n in counts.items())}
+            <li><b>{left}</b> of {limit} emails left today (daily limit)</li></ul>""")
+        if test_to:
+            alert("info", f"Test mode: every email goes to {messaging.mask(test_to)} instead of the guest, "
+                          "with the Guest ID in the subject.")
+        elif skipped:
+            alert("warning", f"{skipped} guest{'s' if skipped != 1 else ''} with demo addresses (@example.com) "
+                             "cannot receive email and will be skipped.")
+        if not messaging.email_ready():
+            alert("warning", "Email is not set up: add gmail_address and gmail_app_password under [messaging] in secrets.")
+        elif len(batch) < len(picked):
+            ui.note(f"Only {left} sends are left today, so only the first {len(batch)} guests will be emailed.")
+
+        if not batch.empty:
+            first = batch.iloc[0]
+            subject, texts = templates.messages(templates.template_for(first["recommended_action"]))
+            with st.expander(f"Preview: email to {first['guest_id']}", icon=":material/mail:"):
+                st.html(f"<p class='bk-subj'><b>Subject:</b> {ui.esc(subject)}</p>"
+                        f"<pre class='bk-body'>{ui.esc(texts['Email'])}</pre>")
+
+        n = len(batch)
+        if st.button(f"Send {n} email{'s' if n != 1 else ''}", type="primary", width="stretch",
+                     icon=":material/send:", key="sel_send", disabled=n == 0 or not messaging.email_ready()):
+            st.session_state["_bulk_done"] = _send(batch, emails, test_to)
+
+    if st.session_state.get("_bulk_done"):
+        form.empty()
+        _results(st.session_state["_bulk_done"], on_done=_clear_ticks)
+
+    ui.css("""
+    .bk-list { margin: 0 0 6px; padding-left: 18px; font-size: 0.92rem; color: var(--ink-800); line-height: 1.7; }
+    .bk-subj { margin: 0 0 6px; font-size: 0.9rem; }
+    .bk-body { white-space: pre-wrap; font-family: inherit; font-size: 0.85rem; margin: 0; color: var(--ink-700); }
+    """)
+
+
+def _results(done: dict, on_done=None) -> None:
     if done["error"]:
         alert("error", done["error"])
     if done["sent"]:
         where = " to your test inbox" if done["test"] else ""
         alert("success", f"{done['sent']} email{'s' if done['sent'] != 1 else ''} sent{where} and recorded in "
-                         "the Action Logs. These guests have left the priority list.")
+                         "the Action Logs. Priority guests among them have left the priority list.")
     if done["failed"]:
         alert("warning", f"{len(done['failed'])} email{'s' if len(done['failed']) != 1 else ''} failed and "
                          "were recorded as Failed: " + "; ".join(f"{g} ({why})" for g, why in done["failed"][:5]))
     if done["unlogged"]:
         alert("warning", f"{done['unlogged']} send{'s' if done['unlogged'] != 1 else ''} could not be recorded "
                          "in the Action Logs.")
-    if st.button("Done", type="primary", width="stretch", key="bulk_done"):
+    if st.button("Done", type="primary", width="stretch", key="bulk_done", on_click=on_done):
         st.session_state.pop("_bulk_done", None)
         st.rerun()
 

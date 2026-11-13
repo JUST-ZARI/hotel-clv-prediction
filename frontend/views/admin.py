@@ -18,6 +18,8 @@ from style import alert
 
 auth.require_auth({"admin"})
 client = auth.user_client()
+if client is None:      # require_auth() has already checked the sign-in
+    st.stop()
 
 ui.page_header("System Administration", "")
 
@@ -28,15 +30,15 @@ def _ts(value) -> str:
     return pd.Timestamp(value).tz_convert("Africa/Nairobi").strftime("%d %b %Y, %H:%M")
 
 
-def _load():
-    users = client.table("users").select("id, email, full_name, role, is_active, created_at") \
+def _load(db):
+    users = db.table("users").select("id, email, full_name, role, is_active, created_at") \
         .order("created_at").execute().data or []
-    invites = client.table("invites").select("*").order("created_at", desc=True).limit(50).execute().data or []
+    invites = db.table("invites").select("*").order("created_at", desc=True).limit(50).execute().data or []
     return users, invites
 
 
 try:
-    users, invites = _load()
+    users, invites = _load(client)
 except APIError:
     alert("error", "Administration tables are missing. Run supabase/007_admin_invites.sql in Supabase.")
     st.stop()
@@ -156,7 +158,7 @@ with ui.card("adm_invite"):
     with st.form("adm_invite_form", border=False, clear_on_submit=True):
         c1, c2 = st.columns([2, 1], gap="small")
         email = c1.text_input("Email address", placeholder="name@hotel.com")
-        role = c2.selectbox("Role", list(auth.ROLES), format_func=auth.ROLES.get)
+        role = c2.selectbox("Role", list(auth.ROLES), format_func=lambda r: auth.ROLES.get(r, r))
         if st.form_submit_button("Send invitation", type="primary", icon=":material/send:"):
             _issue(email, role)
             st.rerun()
@@ -222,7 +224,7 @@ with ui.card("adm_users"):
         c[1].html(f'<span class="ds-td">{ui.esc(u["email"])}</span>')
         key = f"adm_role_{u['id']}"
         c[2].selectbox("Role", list(auth.ROLES), index=list(auth.ROLES).index(u["role"]), key=key,
-                       format_func=auth.ROLES.get, label_visibility="collapsed", disabled=me,
+                       format_func=lambda r: auth.ROLES.get(r, r), label_visibility="collapsed", disabled=me,
                        on_change=_change_role, args=(u["id"], key))
         c[3].html(f'<span class="ds-td">{ui.pill("Active", "green") if u["is_active"] else ui.pill("Deactivated", "red")}</span>')
         c[4].html(f'<span class="ds-td" style="color:var(--ink-500)">Last sign-in {_ts(signed_in.get(u["id"]))}</span>')

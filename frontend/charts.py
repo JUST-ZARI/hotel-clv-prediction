@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -68,7 +70,7 @@ def show(fig: go.Figure, key: str, filename: str) -> None:
         })
 
 
-def hbar_track(labels: list[str], values: list[float], colors: list[str], value_text: list[str],
+def hbar_track(labels: list[str], values: Sequence[float], colors: list[str], value_text: list[str],
                height: int | None = None, max_value: float | None = None) -> go.Figure:
     """Horizontal bars on a light track, labels left and values right (wireframe style)."""
     top = max_value or (max(values) if values else 1)

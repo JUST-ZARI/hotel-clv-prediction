@@ -15,7 +15,7 @@ rm = ui.is_revenue_manager()
 
 ui.page_header("Hotel Guest CLV Dashboard", "")
 
-overdue = alerts.overdue() if not rm else None
+overdue = alerts.overdue() if not rm else pd.DataFrame()   # follow-ups are Marketing only
 if not rm:
     alerts.action_board_banner(alerts.inbox())
     campaigns.follow_up_banner(overdue)
@@ -113,7 +113,32 @@ with ui.card("actions"):
     start, end = ui.paginate("ab", len(rows))
 
     control = repo.control_guests()
-    cols = [
+    page_rows = rows.iloc[start:end]
+
+    # Marketing: tick guests and send each one their recommended action (control-group guests can't be ticked).
+    if not rm:
+        pickable = page_rows.loc[~page_rows["guest_id"].isin(control), "guest_id"].tolist()
+
+        def _select_page() -> None:
+            on = st.session_state["ab_all"]
+            for gid in pickable:
+                st.session_state[ui.select_key("ab", gid)] = on
+
+        chosen = ui.selected("ab", pickable)
+        with st.container(key="ab_pick", horizontal=True, vertical_alignment="center"):
+            st.checkbox("Select all on this page", key="ab_all", on_change=_select_page, disabled=not pickable)
+            st.html(f'<span class="ab-count">{len(chosen)} selected</span>')
+            st.space("stretch")
+            if st.button("Send recommended action", key="ab_send", type="primary", icon=":material/send:"):
+                if chosen:
+                    campaigns.open_selected_email(page_rows[page_rows["guest_id"].isin(chosen)])
+                else:
+                    st.toast("Tick at least one guest first.", icon=":material/info:")
+        st.html("<style>.st-key-ab_pick { gap: 10px !important; margin-bottom: 8px; flex-wrap: wrap !important; }"
+                ".ab-count { font-size: 0.88rem; color: var(--ink-500); white-space: nowrap; }</style>")
+
+    cols = [ui.Col("", 0.35, lambda r: r["guest_id"] not in control, kind="select")] if not rm else []
+    cols += [
         ui.Col("Guest ID", 1.1, kind="guest_link"),
         ui.Col("CLV Tier", 1.3, lambda r: ui.tier_badge(r["tier_badge"])
                + (" " + ui.pill("Priority", "navy") if r.get("is_priority") else "")
@@ -127,7 +152,7 @@ with ui.card("actions"):
         ui.Col("Days Since Last Stay", 1.4, lambda r: f'{r["days_since_last_stay"]} days'),
         ui.Col("", 1.0, kind="view_button"),
     ]
-    ui.data_table("ab", rows.iloc[start:end], cols)
+    ui.data_table("ab", page_rows, cols)
     ui.pagination_bar("ab", len(rows))
 
 if not rm:
@@ -174,7 +199,7 @@ with ui.card("insights"):
             ui.Kpi("Still Waiting", f"{waiting:,}", "Outcome not recorded yet", "hourglass-half"),
         ])
 
-        weekly = (trends.pivot_table(index="week", columns="outcome", values="guest_id", aggfunc="size",
+        weekly = (trends.pivot_table(index="week", columns="outcome", values="guest_id", aggfunc="count",
                                      fill_value=0).sort_index())
         with st.container(horizontal=True, vertical_alignment="top"):
             ui.card_title("Outcomes per week", "Guests contacted each week and what happened next")

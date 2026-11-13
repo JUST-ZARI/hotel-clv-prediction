@@ -179,7 +179,7 @@ def reset_page_on_change(table_key: str, *filters) -> None:
 class Col:
     header: str
     width: float
-    render: Callable[[pd.Series], str] | None = None   # returns HTML
+    render: Callable[[pd.Series], str | bool] | None = None   # returns HTML (select: True/False)
     kind: str = "html"                                  # html | guest_link | view_button | select
     align: str = "left"                                 # (select: render returns True if the row can be ticked)
 
