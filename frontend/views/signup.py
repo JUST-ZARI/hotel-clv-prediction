@@ -130,7 +130,7 @@ def _request_dialog() -> None:
     st.text_input("Work email", key="rq_email", placeholder="name@hotel.com", icon=":material/mail:",
                   autocomplete="email")
     field_error(errors.get("email"))
-    st.selectbox("Role you need", auth.REQUESTABLE_ROLES, format_func=auth.ROLES.get, key="rq_role")
+    st.selectbox("Role you need", auth.REQUESTABLE_ROLES, format_func=lambda r: auth.ROLES.get(r, r), key="rq_role")
     field_error(errors.get("role"))
     if errors.get("form"):
         alert("error", errors["form"])

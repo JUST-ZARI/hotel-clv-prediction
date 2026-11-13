@@ -15,7 +15,7 @@ rm = ui.is_revenue_manager()
 
 ui.page_header("Hotel Guest CLV Dashboard", "")
 
-overdue = alerts.overdue() if not rm else None
+overdue = alerts.overdue() if not rm else pd.DataFrame()   # follow-ups are Marketing only
 if not rm:
     alerts.action_board_banner(alerts.inbox())
     campaigns.follow_up_banner(overdue)
@@ -199,7 +199,7 @@ with ui.card("insights"):
             ui.Kpi("Still Waiting", f"{waiting:,}", "Outcome not recorded yet", "hourglass-half"),
         ])
 
-        weekly = (trends.pivot_table(index="week", columns="outcome", values="guest_id", aggfunc="size",
+        weekly = (trends.pivot_table(index="week", columns="outcome", values="guest_id", aggfunc="count",
                                      fill_value=0).sort_index())
         with st.container(horizontal=True, vertical_alignment="top"):
             ui.card_title("Outcomes per week", "Guests contacted each week and what happened next")
