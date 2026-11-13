@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from utils import HOTEL_NAME
 
-TEMPLATES = ["Win-back offer", "Suite upgrade", "Loyalty thank-you", "Seasonal news", "Follow-up"]
+TEMPLATES = ["Win-back offer", "Manager's invitation", "Suite upgrade", "Loyalty thank-you", "Seasonal news",
+             "Follow-up"]
 
 
 def template_for(action: str) -> str:
     """The message template that matches a recommended action."""
     a = action.lower()
+    if "personal call" in a:
+        return "Manager's invitation"
     if "upsell" in a:
         return "Suite upgrade"
     if any(k in a for k in ("loyalty", "concierge")):
@@ -48,6 +51,14 @@ def messages(template: str, name: str = "") -> tuple[str, dict[str, str]]:
                 "weekend packages are now available at special rates. We would love to welcome you back.")
         sms = (f"{HOTEL_NAME}: Our new seasonal menu and weekend packages are here. "
                f"Reply to this message to book your stay.")
+    elif template == "Manager's invitation":
+        subject = f"A personal invitation from the General Manager of {HOTEL_NAME}"
+        lead = ("I wanted to write to you personally. Guests like you mean a great deal to us, and it has been "
+                "a while since we last welcomed you. I would like to arrange your next stay myself, with a "
+                "special returning-guest rate and a complimentary room upgrade. If you would like to talk it "
+                "through, simply reply with a convenient time and phone number, and I will call you.")
+        sms = (f"{HOTEL_NAME}: Our General Manager would like to personally welcome you back with a special "
+               f"returning-guest rate and a free upgrade. Reply with a good time to call you.")
     elif template == "Follow-up":
         subject = f"A reminder from {HOTEL_NAME}"
         lead = ("We recently wrote to you with an offer for your next stay, and we wanted to let you know "
@@ -64,12 +75,13 @@ def messages(template: str, name: str = "") -> tuple[str, dict[str, str]]:
     if name:   # "Hotel: We miss you!" → "Hotel: Dear Jane, we miss you!"
         body = sms.removeprefix(f"{HOTEL_NAME}: ")
         sms = f"{HOTEL_NAME}: Dear {name}, {body[:1].lower()}{body[1:]}"
+    signer = "General Manager" if template == "Manager's invitation" else "Guest Relations Team"
     email = (f"Dear {name or 'Valued Guest'},\n\n"
              f"Warm greetings from {HOTEL_NAME}.\n\n"
              f"{lead}\n\n"
              f"To reserve, simply reply to this email and our reservations team will be glad to assist you.\n\n"
              f"We look forward to welcoming you back.\n\n"
              f"Warm regards,\n"
-             f"Guest Relations Team\n"
+             f"{signer}\n"
              f"{HOTEL_NAME}, Nairobi")
     return subject, {"Email": email, "SMS": sms}
