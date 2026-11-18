@@ -1,0 +1,48 @@
+# Keeps the live dashboard awake on Streamlit Community Cloud.
+# Community Cloud puts an app to sleep after 12 hours with no visitors, so this
+# opens the app in a real (headless) browser every 6 hours. If the app is
+# asleep, it clicks the wake-up button and waits for the app to start.
+name: Keep dashboard awake
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # every 6 hours (GitHub may start it a little late)
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install a headless browser
+        run: |
+          pip install playwright==1.47.0
+          python -m playwright install --with-deps chromium
+
+      - name: Visit the dashboard
+        env:
+          APP_URL: https://hotel-clv-prediction.streamlit.app/
+        run: |
+          python - <<'EOF'
+          import os
+          from playwright.sync_api import sync_playwright
+
+          url = os.environ["APP_URL"]
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto(url, timeout=120_000)
+              page.wait_for_timeout(10_000)
+              wake = page.get_by_role("button", name="Yes, get this app back up!")
+              if wake.count():
+                  wake.first.click()
+                  print("The app was asleep: clicked the wake-up button.")
+                  page.wait_for_timeout(120_000)   # give it time to start
+              else:
+                  print("The app is awake.")
+              browser.close()
+          EOF
