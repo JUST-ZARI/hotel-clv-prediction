@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import pandas as pd
 import streamlit as st
@@ -69,7 +69,7 @@ def _client():
     return client
 
 
-def _setup_problem(message: str) -> None:
+def _setup_problem(message: str) -> NoReturn:
     st.error(message)
     st.stop()
 
@@ -454,7 +454,7 @@ def _cost_row(_client) -> dict | None:
 def campaign_costs() -> tuple[dict[str, float], bool]:
     """(costs in KSh, saved?) — the defaults are used until 011 has been run."""
     saved = _cost_row(_client())
-    costs = dict(COST_DEFAULTS)
+    costs: dict[str, float] = {k: float(v) for k, v in COST_DEFAULTS.items()}
     if isinstance(saved, dict):
         costs.update({k: float(v) for k, v in saved.items() if k in COST_DEFAULTS and isinstance(v, (int, float))})
     return costs, isinstance(saved, dict)
@@ -547,15 +547,18 @@ def budget_guidance(trends: pd.DataFrame, costs: dict[str, float]) -> pd.DataFra
 def budget_plan(guidance: pd.DataFrame, budget: float, available: dict[str, int]) -> pd.DataFrame:
     """Spend the budget on the tiers with the most predicted value per KSh first, up to the guests available."""
     left, rows = float(budget), []
-    for r in guidance[guidance["enough"]].itertuples():
-        n_avail = int(available.get(r.clv_tier, 0))
-        n = n_avail if r.cost_per_contact <= 0 else min(n_avail, int(left // r.cost_per_contact))
+    for r in guidance[guidance["enough"]].to_dict("records"):
+        tier = str(r["clv_tier"])
+        per_contact = float(r["cost_per_contact"])
+        n_avail = int(available.get(tier, 0))
+        n = n_avail if per_contact <= 0 else min(n_avail, int(left // per_contact))
         if n <= 0:
             continue
-        cost = n * r.cost_per_contact
+        cost = n * per_contact
         left -= cost
-        rows.append({"clv_tier": r.clv_tier, "guests": n, "cost": cost,
-                     "expected_returns": n * (r.return_rate or 0), "expected_value": n * r.value_per_contact})
+        rows.append({"clv_tier": tier, "guests": n, "cost": cost,
+                     "expected_returns": n * float(r["return_rate"] or 0),
+                     "expected_value": n * float(r["value_per_contact"])})
     return pd.DataFrame(rows, columns=["clv_tier", "guests", "cost", "expected_returns", "expected_value"])
 
 
@@ -595,8 +598,8 @@ def action_logs(guest_id: str) -> pd.DataFrame:
             .order("logged_at", desc=True).execute()
     logs = pd.DataFrame(_rows(res), columns=[c.strip() for c in LOG_COLUMNS.split(",")])
     staff = _staff(client)
-    logs["user_name"] = logs["user_id"].map(lambda u: staff.get(u, {}).get("full_name", ""))
-    logs["user_role"] = logs["user_id"].map(lambda u: staff.get(u, {}).get("role"))
+    logs["user_name"] = logs["user_id"].map(lambda u: staff.get(str(u), {}).get("full_name", ""))
+    logs["user_role"] = logs["user_id"].map(lambda u: staff.get(str(u), {}).get("role"))
     logs["logged_at"] = pd.to_datetime(logs["logged_at"], utc=True).dt.tz_convert("Africa/Nairobi")
     return logs
 
@@ -852,7 +855,7 @@ def _apply_decisions(_base: pd.DataFrame, run_at: str, version: str, _state: dic
 def _effective(base: pd.DataFrame, run_at: str) -> pd.DataFrame:
     decisions = _decisions(_client())
     state = _decision_state(decisions)
-    if not state:
+    if decisions is None or not state:
         return base
     version = f"{len(decisions)}:{decisions['decided_at'].max()}"
     return _apply_decisions(base, run_at, version, state)
@@ -1029,12 +1032,12 @@ INBOX_COLUMNS = ["guest_id", "decided_at", "reason"]
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _actions_for(_client, guest_ids: tuple[str, ...], since: str) -> pd.DataFrame:
-    """When each of these guests last had an action logged (since `since`)."""
+    """When each of these guests last had an action logged (since `since`); failed sends do not count."""
     found: list[dict] = []
     ids = list(guest_ids)
     for i in range(0, len(ids), 150):            # keep each request URL short
         res = (_client.table("action_logs").select("guest_id, logged_at")
-               .in_("guest_id", ids[i:i + 150]).gte("logged_at", since).execute())
+               .in_("guest_id", ids[i:i + 150]).gte("logged_at", since).neq("action_status", "Failed").execute())
         found += _rows(res)
     df = pd.DataFrame(found, columns=["guest_id", "logged_at"])
     df["logged_at"] = pd.to_datetime(df["logged_at"], utc=True)

@@ -107,7 +107,7 @@ def _compose(cands: pd.DataFrame, key: str, size: int | None, lead: list[str]) -
     elif len(batch) < want:
         ui.note(f"Only {left} sends are left today, so only the first {len(batch)} guests will be contacted.")
     if not email and ready and messaging.is_sandbox():
-        ui.note("Africa's Talking sandbox: the SMS appear in the Africa's Talking simulator, not on a real phone.")
+        ui.note("The SMS appear in the Africa's Talking simulator.")
 
     if not batch.empty:
         first = batch.iloc[0]
