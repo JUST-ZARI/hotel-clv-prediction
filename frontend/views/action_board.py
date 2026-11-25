@@ -193,8 +193,8 @@ with ui.card("insights"):
     if trends.empty:
         ui.note("No completed actions in this period yet. Charts appear once actions are sent and recorded.")
     else:
-        decided = int((trends["outcome"] != "Waiting").sum())
-        came = int((trends["outcome"] == "Came back").sum())
+        decided = len(trends[trends["outcome"] != "Waiting"])
+        came = len(trends[trends["outcome"] == "Came back"])
         waiting = len(trends) - decided
         ui.kpi_row([
             ui.Kpi("Actions Sent", f"{len(trends):,}", period, "paper-plane", "brand"),
