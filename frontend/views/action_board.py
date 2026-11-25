@@ -87,15 +87,18 @@ with ui.card("actions"):
     with st.container(key="bar_ab", horizontal=True, vertical_alignment="center"):
         tier = ui.filter_select("CLV Tier", tier_opts, "ab_tier")
         action = ui.filter_select("Recommended Action", action_opts, "ab_action", width=330)
-        show = ui.filter_select("Show", ["All guests", "Priority only"], "ab_show", width=210)
+        show = ui.filter_select("Show", ["All guests", "Priority only", "Not yet contacted"], "ab_show", width=250)
         query = ui.search_box("ab_search")
         download_slot = st.container(width="content")
 
     # Guests the Revenue Manager sent as priority come first, then highest predicted CLV.
     has_priority = "is_priority" in queue.columns
     rows = queue.sort_values(["is_priority", "predicted_clv"], ascending=[False, False]) if has_priority else queue
+    contacted = repo.contacted_guests()     # sent a message, outcome still Waiting
     if show == "Priority only":
         rows = rows[rows["is_priority"]] if has_priority else rows.iloc[0:0]
+    elif show == "Not yet contacted":
+        rows = rows[~rows["guest_id"].isin(contacted)]
     if tier != "All Tiers":
         rows = rows[rows["clv_tier"] == tier]
     if action != "All Actions":
@@ -140,8 +143,9 @@ with ui.card("actions"):
     cols = [ui.Col("", 0.35, lambda r: r["guest_id"] not in control, kind="select")] if not rm else []
     cols += [
         ui.Col("Guest ID", 1.1, kind="guest_link"),
-        ui.Col("CLV Tier", 1.3, lambda r: ui.tier_badge(r["tier_badge"])
+        ui.Col("CLV Tier", 1.8, lambda r: ui.tier_badge(r["tier_badge"])
                + (" " + ui.pill("Priority", "navy") if r.get("is_priority") else "")
+               + (" " + ui.pill("Contacted", "green") if r["guest_id"] in contacted else "")
                + (" " + ui.pill("Control group", "amber") if r["guest_id"] in control else "")),
     ]
     if rm:

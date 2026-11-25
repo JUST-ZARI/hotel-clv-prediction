@@ -627,6 +627,26 @@ def log_action(guest_id: str, action_taken: str, delivery_channel: str,
     _recent_completed.clear()
     _completed_actions.clear()
     _actions_for.clear()
+    _awaiting_outcome.clear()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _awaiting_outcome(_client) -> frozenset[str]:
+    res = (_client.table("action_logs").select("guest_id").eq("action_status", "Completed")
+           .eq("outcome", "Waiting").execute())
+    return frozenset(str(r["guest_id"]) for r in _rows(res))
+
+
+def contacted_guests() -> set[str]:
+    """Guests who were sent a message and whose outcome is still 'Waiting' (shown as Contacted).
+
+    Once Marketing records Came back or Didn't come back, the guest is no longer marked, so a
+    guest who did not come back can be contacted again.
+    """
+    try:
+        return set(_awaiting_outcome(_client()))
+    except APIError:
+        return set()
 
 
 def sends_last_24h() -> int:
@@ -655,6 +675,7 @@ def set_outcome(log_id: str, outcome: str) -> None:
     _completed_actions.clear()
     _held_out.clear()
     _overdue.clear()
+    _awaiting_outcome.clear()
     if outcome == "Came back":
         _decisions.clear()      # the database removes the guest's Priority flag (009 trigger)
 
@@ -676,6 +697,7 @@ def set_outcomes(log_ids: list[str], outcome: str) -> int:
     _completed_actions.clear()
     _held_out.clear()
     _overdue.clear()
+    _awaiting_outcome.clear()
     if outcome == "Came back":
         _decisions.clear()      # the 009 trigger removes each returning guest's Priority flag
     return saved
