@@ -87,9 +87,7 @@ def _compose(cands: pd.DataFrame, key: str, size: int | None, lead: list[str]) -
             + "".join(f"<li>{n} × {ui.esc(a)}</li>" for a, n in counts.items())
             + f"<li><b>{left}</b> of {limit} messages left today (daily limit)</li></ul>")
     if test_to:
-        where = "the subject" if email else "the message"
-        alert("info", f"Test mode: every {NOUN[channel][0]} goes to {messaging.mask(test_to)} instead of the "
-                      f"guest, with the Guest ID in {where}.")
+        pass    # test mode: messages go to the test address/phone; no notice shown
     elif skipped and email:
         alert("warning", f"{skipped} guest{'s' if skipped != 1 else ''} with demo addresses (@example.com) cannot "
                          "receive email and will be skipped. Add test_recipient under [messaging] in secrets to "
@@ -106,8 +104,6 @@ def _compose(cands: pd.DataFrame, key: str, size: int | None, lead: list[str]) -
         alert("warning", "Daily limit reached. Try again later, or raise daily_limit under [messaging] in secrets.")
     elif len(batch) < want:
         ui.note(f"Only {left} sends are left today, so only the first {len(batch)} guests will be contacted.")
-    if not email and ready and messaging.is_sandbox():
-        ui.note("The SMS appear in the Africa's Talking simulator.")
 
     if not batch.empty:
         first = batch.iloc[0]
